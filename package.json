@@ -1,0 +1,15 @@
+{
+  "name": "volna",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Волна — локальный мессенджер с фото на Node.js без зависимостей",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "media": "node media.js",
+    "test": "node tools/smoke.mjs"
+  }
+}
