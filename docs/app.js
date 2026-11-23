@@ -1290,4 +1290,13 @@ async function boot() {
 window.__volna = state;
 window.__volnaApi = API_BASE;
 
+// офлайн-оболочка: позволяет открыть приложение без сети и установить его на телефон
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {
+      /* service worker не критичен */
+    });
+  });
+}
+
 boot();

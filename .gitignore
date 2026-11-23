@@ -15,3 +15,7 @@ Thumbs.db
 
 # скачанный cloudflared
 tools/bin/
+
+# сборка Android: артефакты и отладочный ключ
+android/build/
+android/*.jks

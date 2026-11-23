@@ -5,7 +5,7 @@
  *
  *   node tools/make-pages.mjs
  */
-import { mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, cpSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -16,7 +16,7 @@ const DOCS = path.join(ROOT, 'docs');
 rmSync(DOCS, { recursive: true, force: true });
 mkdirSync(DOCS, { recursive: true });
 
-// пути в интерфейсе абсолютные (/style.css) — наPages сайт лежит в подпапке /volna/
+// пути в интерфейсе относительные (./style.css) — на Pages сайт живёт в подпапке /volna/
 const html = readFileSync(path.join(PUBLIC, 'index.html'), 'utf8')
   .replace(/(href|src)="\//g, '$1="./')
   .replace('<title>Волна</title>', '<title>Волна — мессенджер</title>');
@@ -31,11 +31,12 @@ writeFileSync(
 // без .nojekyll Pages прогоняет файлы через Jekyll
 writeFileSync(path.join(DOCS, '.nojekyll'), '', 'utf8');
 
-for (const file of ['app.js', 'style.css', 'icon.svg']) {
+for (const file of ['app.js', 'style.css', 'icon.svg', 'manifest.webmanifest', 'sw.js']) {
   copyFileSync(path.join(PUBLIC, file), path.join(DOCS, file));
 }
+cpSync(path.join(PUBLIC, 'icons'), path.join(DOCS, 'icons'), { recursive: true });
 
 console.log('docs/ собрана:');
-for (const file of ['index.html', 'config.js', 'app.js', 'style.css', 'icon.svg', '.nojekyll']) {
+for (const file of ['index.html', 'config.js', 'app.js', 'style.css', 'icon.svg', 'manifest.webmanifest', 'sw.js', 'icons/']) {
   console.log('  ' + file);
 }
