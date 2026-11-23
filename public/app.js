@@ -1332,16 +1332,8 @@ async function boot() {
     $('#api-current-url').textContent = API_BASE.replace(/^https?:\/\//, '');
   }
 
-  // в закрытом режиме демо-аккаунты не афишируем и быстрый вход отключаем
+  // в закрытом режиме подсказку про регистрацию не показываем
   if (INVITE_REQUIRED) $('#auth-hint').hidden = true;
-  else if (location.hash === '#demo') {
-    try {
-      await doAuth('anya', '1234');
-      return;
-    } catch (err) {
-      showAuthError(err.message);
-    }
-  }
 
   if (!state.token) return;
   try {

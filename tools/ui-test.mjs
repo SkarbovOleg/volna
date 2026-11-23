@@ -130,17 +130,53 @@ async function evaluate(expression) {
   return res.result && res.result.value;
 }
 
+/** Регистрирует аккаунт через API: демо-пользователей в базе больше нет. */
+async function register(name, password = 'test-1234') {
+  const res = await fetch(`${BASE}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(`регистрация ${name}: ${data.error}`);
+  return data;
+}
+
 console.log('\nВолна · проверка интерфейса\n');
 
 try {
   await startServer();
-  await startBrowser();
 
-  await send('Page.navigate', { url: `${BASE}/#demo` });
+  // два аккаунта и одно сообщение, чтобы в интерфейсе был открытый чат
+  const suffix = String(Date.now()).slice(-5);
+  const alice = await register(`тест${suffix}`);
+  const bob = await register(`друг${suffix}`);
+  await fetch(`${BASE}/api/messages`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${bob.token}` },
+    body: JSON.stringify({ to: alice.user.id, body: 'привет от друга' }),
+  });
+
+  await startBrowser();
+  await send('Page.navigate', { url: `${BASE}/` });
+  await wait(2500);
+
+  await evaluate(`
+    (function () {
+      const name = document.querySelector('#auth-name');
+      const pass = document.querySelector('#auth-pass');
+      name.value = ${JSON.stringify(`тест${suffix}`)};
+      pass.value = 'test-1234';
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+      pass.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('#auth-submit').click();
+      return 'ok';
+    })()
+  `);
   await wait(3500);
 
   const logged = await evaluate('!!document.querySelector("#conversation:not([hidden])") && document.querySelector("#me-name").textContent');
-  check('вход в демо и открытый чат', Boolean(logged), String(logged));
+  check('вход в аккаунт и открытый чат', Boolean(logged), String(logged));
 
   // выбираем файл в настоящем <input type=file>
   const file = path.join(ROOT, 'assets', 'demo-photo.jpg');
@@ -170,7 +206,7 @@ try {
   check('баннер переподключения скрыт', state.banner === true);
 
   const health = await (await fetch(`${BASE}/api/health`)).json();
-  check('на сервере есть аккаунты', health.users >= 3, String(health.users));
+  check('на сервере есть аккаунты', health.users >= 2, String(health.users));
 } catch (err) {
   failed += 1;
   console.log('  FAIL исключение:', err.message);

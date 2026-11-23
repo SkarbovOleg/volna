@@ -374,62 +374,11 @@ function setOffline(userId, res) {
   return false;
 }
 
-/* ─────────────────────── демо-данные ─────────────────────── */
+/* ─────────────────────── демо-данные отключены ─────────────────────── */
 
-function seedIfEmpty() {
-  const { count } = db.prepare('SELECT COUNT(*) AS count FROM users').get();
-  if (count > 0) return;
-  const demo = [
-    ['anya', '1234', 268],
-    ['mark', '1234', 205],
-    ['lena', '1234', 330],
-  ];
-  const ids = {};
-  for (const [name, pass, hue] of demo) {
-    const salt = crypto.randomBytes(16).toString('hex');
-    const info = q.insertUser.run(name, hashPass(pass, salt), salt, hue, now());
-    ids[name] = Number(info.lastInsertRowid);
-  }
+// Аккаунты создаёт только регистрация: никаких демо-пользователей в базе нет.
+// Если нужен демо-набор для тестов — см. tools/ui-test.mjs, он поднимает свою копию.
 
-  // демонстрационное фото, чтобы галерея в переписке была не пустой
-  let photoId = null;
-  const sample = path.join(ROOT, 'assets', 'demo-photo.jpg');
-  if (fs.existsSync(sample)) {
-    const buf = fs.readFileSync(sample);
-    photoId = crypto.randomBytes(12).toString('base64url');
-    fs.writeFileSync(path.join(MEDIA_DIR, photoId), buf);
-    db.prepare(
-      'INSERT INTO media (id, owner_id, mime, bytes, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ).run(photoId, ids.anya, 'image/jpeg', buf.length, 1200, 800, now());
-    // у anya фото профиля — тот же кадр, просто обрезается аватаром
-    q.setAvatar.run(photoId, ids.anya);
-  }
-
-  const script = [
-    ['anya', 'mark', 'Привет! Ты уже видел новый интерфейс?', 52, null],
-    ['mark', 'anya', 'Да, стало заметно чище. Особенно тёмная тема 👌', 49, null],
-    ['anya', 'mark', 'Я добавила индикатор «печатает…» — попробуй', 45, null],
-    ['mark', 'anya', 'Работает. Слушай, а история правда сохраняется?', 41, null],
-    ['anya', 'mark', 'Правда. Перезапусти сервер — всё останется на месте.', 39, null],
-    ['mark', 'anya', 'Тогда это уже не игрушка 🙂', 12, null],
-    ['lena', 'anya', 'Аня, привет! Скинь потом ссылку на мессенджер', 300, null],
-    ['anya', 'mark', 'А ещё теперь можно отправлять фото. Вот, поймала закат с балкона 🌇', 33, photoId],
-  ];
-  for (const [from, to, body, minutesAgo, media] of script) {
-    q.insertMessage.run(
-      ids[from],
-      ids[to],
-      body,
-      media ? 'photo' : 'text',
-      media,
-      null,
-      now() - minutesAgo * 60 * 1000,
-    );
-  }
-  console.log('  Демо-аккаунты: anya / mark / lena, пароль 1234');
-}
-
-seedIfEmpty();
 
 /* ─────────────────────── бэкап базы ─────────────────────── */
 
