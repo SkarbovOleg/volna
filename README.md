@@ -3,6 +3,9 @@
 Маленький мессенджер, который живёт на твоём компьютере: личные чаты, история сообщений,
 фотографии, онлайн-статусы, индикатор «печатает…», отметки о прочтении. Тёмный минималистичный интерфейс.
 
+**Приложение для Android:** [volna-1.0.apk](https://github.com/SkarbovOleg/volna/raw/main/dist/volna-1.0.apk) ·
+**в браузере:** [skarbovoleg.github.io/volna](https://skarbovoleg.github.io/volna/)
+
 ![Чат](screenshots/chat.png)
 
 ## Запуск
