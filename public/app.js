@@ -396,6 +396,10 @@ async function enterChat() {
 
   await loadUsers();
   connectStream();
+  // если SSE через прокси не доходит, статусы подтянем отдельным запросом
+  setTimeout(() => {
+    if (state.me) loadUsers();
+  }, 2500);
 
   const desktop = window.matchMedia('(min-width: 881px)').matches;
   if (desktop && !state.activeId && state.users.length) openChat(state.users[0].id);
