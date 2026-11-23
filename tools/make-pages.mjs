@@ -35,8 +35,9 @@ for (const file of ['app.js', 'style.css', 'icon.svg', 'manifest.webmanifest', '
   copyFileSync(path.join(PUBLIC, file), path.join(DOCS, file));
 }
 cpSync(path.join(PUBLIC, 'icons'), path.join(DOCS, 'icons'), { recursive: true });
+cpSync(path.join(PUBLIC, 'stickers'), path.join(DOCS, 'stickers'), { recursive: true });
 
 console.log('docs/ собрана:');
-for (const file of ['index.html', 'config.js', 'app.js', 'style.css', 'icon.svg', 'manifest.webmanifest', 'sw.js', 'icons/']) {
+for (const file of ['index.html', 'config.js', 'app.js', 'style.css', 'icon.svg', 'manifest.webmanifest', 'sw.js', 'icons/', 'stickers/']) {
   console.log('  ' + file);
 }

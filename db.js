@@ -68,5 +68,6 @@ export function openDb() {
   addColumn(db, 'users', 'avatar_media_id', 'TEXT');
   addColumn(db, 'messages', 'kind', "TEXT NOT NULL DEFAULT 'text'");
   addColumn(db, 'messages', 'media_id', 'TEXT');
+  addColumn(db, 'messages', 'sticker_id', 'TEXT');
   return db;
 }

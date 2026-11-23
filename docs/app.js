@@ -32,6 +32,10 @@ const mediaSrc = (id) => (id ? `${MEDIA_URL}/f/${encodeURIComponent(id)}` : '');
 const INVITE_REQUIRED = Boolean(CONFIG.inviteRequired);
 const apiUrl = (path) => `${API_BASE}${path}`;
 
+/** Набор стикеров: id = имя файла в ./stickers (лежит рядом с интерфейсом). */
+const STICKERS = ['smile', 'laugh', 'love', 'sad', 'angry', 'sleepy', 'cool', 'party'];
+const stickerSrc = (id) => `./stickers/${id}.svg`;
+
 const state = {
   token: localStorage.getItem('volna.token') || '',
   me: null,
@@ -279,6 +283,61 @@ $('#attach-input').addEventListener('change', async (event) => {
 });
 
 $('#attach-remove').addEventListener('click', clearAttachment);
+
+/* ───────────────────────── стикеры ───────────────────────── */
+
+let stickerPanelReady = false;
+
+function buildStickerPanel() {
+  const grid = $('#sticker-grid');
+  grid.replaceChildren();
+  for (const id of STICKERS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sticker-item';
+    button.title = 'Отправить стикер';
+    const img = document.createElement('img');
+    img.src = stickerSrc(id);
+    img.alt = id;
+    img.loading = 'lazy';
+    button.append(img);
+    button.addEventListener('click', () => {
+      hideStickers();
+      sendSticker(id);
+    });
+    grid.append(button);
+  }
+  stickerPanelReady = true;
+}
+
+function hideStickers() {
+  $('#sticker-panel').hidden = true;
+}
+
+function toggleStickers() {
+  const panel = $('#sticker-panel');
+  if (!panel.hidden) {
+    panel.hidden = true;
+    return;
+  }
+  if (!stickerPanelReady) buildStickerPanel();
+  panel.hidden = false;
+  clearAttachment();
+}
+
+async function sendSticker(id) {
+  const peerId = state.activeId;
+  if (!peerId) return;
+  try {
+    const data = await api('/api/messages', { method: 'POST', body: { to: peerId, sticker: id } });
+    onIncoming(data.message);
+    scrollToBottom();
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
+$('#stickers').addEventListener('click', toggleStickers);
 
 /* ───────────────────────── лайтбокс ───────────────────────── */
 
@@ -838,6 +897,7 @@ async function openChat(peerId) {
   if (peer) renderHead(peer);
   renderList();
   $('#typing').hidden = true;
+  hideStickers();
 
   const thread = ensureThread(peerId);
   if (!thread.loaded) {
@@ -981,8 +1041,10 @@ function renderList() {
       preview.append(prefix);
     }
     const isPhoto = user.lastKind === 'photo';
+    const isSticker = user.lastKind === 'sticker';
     const text = document.createElement('span');
-    if (user.lastBody) text.textContent = isPhoto ? `📷 ${user.lastBody}` : user.lastBody;
+    if (isSticker) text.textContent = 'Стикер';
+    else if (user.lastBody) text.textContent = isPhoto ? `📷 ${user.lastBody}` : user.lastBody;
     else if (isPhoto) text.textContent = '📷 Фото';
     else {
       text.textContent = 'Нет сообщений';
@@ -1091,7 +1153,15 @@ function renderMessages({ keepScroll = false } = {}) {
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
 
-    if (m.kind === 'photo' && m.mediaId) {
+    if (m.kind === 'sticker' && m.stickerId) {
+      bubble.classList.add('is-sticker');
+      const img = document.createElement('img');
+      img.className = 'sticker-img';
+      img.src = stickerSrc(m.stickerId);
+      img.alt = 'Стикер';
+      img.loading = 'lazy';
+      bubble.append(img);
+    } else if (m.kind === 'photo' && m.mediaId) {
       bubble.classList.add('is-photo');
       if (m.body) bubble.classList.add('has-caption');
       const img = document.createElement('img');

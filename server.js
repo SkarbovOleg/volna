@@ -25,6 +25,9 @@ const MAX_TEXT = 4000;
 /** Если задан — зарегистрироваться можно только с этим кодом. */
 const INVITE_CODE = (process.env.INVITE_CODE || '').trim();
 
+/** Набор стикеров лежит в public/stickers — id должны совпадать с именами файлов. */
+const STICKERS = new Set(['smile', 'laugh', 'love', 'sad', 'angry', 'sleepy', 'cool', 'party']);
+
 /* ─────────────────────────── база ─────────────────────────── */
 
 const db = openDb();
@@ -39,7 +42,7 @@ const q = {
   setAvatar: db.prepare('UPDATE users SET avatar_media_id = ? WHERE id = ?'),
   mediaOwner: db.prepare('SELECT owner_id FROM media WHERE id = ?'),
   insertMessage: db.prepare(
-    'INSERT INTO messages (sender_id, recipient_id, body, kind, media_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO messages (sender_id, recipient_id, body, kind, media_id, sticker_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ),
   messageById: db.prepare('SELECT * FROM messages WHERE id = ?'),
   markRead: db.prepare('UPDATE messages SET read_at = ? WHERE sender_id = ? AND recipient_id = ? AND read_at IS NULL'),
@@ -92,6 +95,7 @@ function publicMessage(row) {
     body: row.body,
     kind: row.kind || 'text',
     mediaId: row.media_id || null,
+    stickerId: row.sticker_id || null,
     at: row.created_at,
     readAt: row.read_at,
   };
@@ -418,6 +422,7 @@ function seedIfEmpty() {
       body,
       media ? 'photo' : 'text',
       media,
+      null,
       now() - minutesAgo * 60 * 1000,
     );
   }
@@ -529,17 +534,26 @@ function history(userId, otherId, before, limit) {
 }
 
 function sendMessage(user, payload) {
-  const to = Number(payload.to);
-  const body = String(payload.body || '').replace(/\r\n/g, '\n').trim();
+  const stickerId = payload.sticker ? String(payload.sticker) : null;
+  let body = String(payload.body || '').replace(/\r\n/g, '\n').trim();
   const mediaId = payload.mediaId ? String(payload.mediaId) : null;
 
-  if (!Number.isInteger(to) || to <= 0) throw new HttpError(400, 'Не указан получатель');
-  if (!body && !mediaId) throw new HttpError(400, 'Пустое сообщение');
+  if (stickerId) {
+    if (!STICKERS.has(stickerId)) throw new HttpError(400, 'Неизвестный стикер');
+    if (mediaId) throw new HttpError(400, 'Стикер отправляется без фото');
+    body = '';
+  }
+
+  if (!body && !mediaId && !stickerId) throw new HttpError(400, 'Пустое сообщение');
   if (body.length > MAX_TEXT) throw new HttpError(400, `Максимум ${MAX_TEXT} символов`);
+
+  const to = Number(payload.to);
+  if (!Number.isInteger(to) || to <= 0) throw new HttpError(400, 'Не указан получатель');
   if (!q.userById.get(to)) throw new HttpError(404, 'Нет такого пользователя');
   if (to === user.id) throw new HttpError(400, 'Нельзя писать самому себе');
 
   let kind = 'text';
+  if (stickerId) kind = 'sticker';
   if (mediaId) {
     const media = q.mediaOwner.get(mediaId);
     if (!media) throw new HttpError(400, 'Фотография не найдена');
@@ -547,7 +561,7 @@ function sendMessage(user, payload) {
     kind = 'photo';
   }
 
-  const info = q.insertMessage.run(user.id, to, body, kind, mediaId, now());
+  const info = q.insertMessage.run(user.id, to, body, kind, mediaId, stickerId, now());
   const message = withMedia([publicMessage(q.messageById.get(Number(info.lastInsertRowid)))])[0];
   broadcastTo(to, 'message', message);
   broadcastTo(user.id, 'message', message);
