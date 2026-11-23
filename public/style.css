@@ -857,14 +857,45 @@ button {
   color: var(--muted-dim);
 }
 
-.meta .ticks {
-  font-size: 11px;
-  letter-spacing: -1.5px;
-  color: rgba(255, 255, 255, 0.55);
+/* отметка о прочтении: контур глаза → отправлено, залитый зрачок → прочитано */
+
+.eye-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+  opacity: 0.45;
+  transition: opacity 0.18s ease;
 }
 
-.meta .ticks.read {
-  color: #b9c9ff;
+.eye-badge svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  overflow: visible;
+}
+
+.eye-badge .eye-outline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linejoin: round;
+}
+
+.eye-badge .eye-pupil {
+  fill: transparent;
+  transition: fill 0.18s ease;
+}
+
+.eye-badge.read {
+  opacity: 1;
+  color: #eaf0ff;
+}
+
+.eye-badge.read .eye-pupil {
+  fill: currentColor;
 }
 
 /* ───────────── печатает ───────────── */
@@ -1099,8 +1130,14 @@ button {
   color: rgba(255, 255, 255, 0.62);
 }
 
-.bubble.is-photo .ticks {
-  color: #d6e0ff;
+.bubble.is-photo .eye-badge {
+  color: #dfe8ff;
+  opacity: 0.9;
+}
+
+.bubble.is-photo .eye-badge.read {
+  color: #fff;
+  opacity: 1;
 }
 
 .lightbox {

@@ -145,6 +145,24 @@ function makeAvatar(user, extraClass = '') {
   return el;
 }
 
+/**
+ * Отметка о прочтении: контур глаза — отправлено, залитый зрачок — прочитано.
+ * SVG собираем строкой, чтобы не плодить разметку в index.html.
+ */
+function eyeBadge(read) {
+  const wrap = document.createElement('span');
+  wrap.className = 'eye-badge' + (read ? ' read' : '');
+  wrap.title = read ? 'Прочитано' : 'Отправлено';
+  wrap.setAttribute('role', 'img');
+  wrap.setAttribute('aria-label', read ? 'прочитано' : 'отправлено');
+  wrap.innerHTML = `
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path class="eye-outline" d="M1.6 12c2.8-4.8 6.2-7.2 10.4-7.2S19.6 7.2 22.4 12c-2.8 4.8-6.2 7.2-10.4 7.2S4.4 16.8 1.6 12Z" />
+      <circle class="eye-pupil" cx="12" cy="12" r="3.5" />
+    </svg>`;
+  return wrap;
+}
+
 function banner(show, text) {
   const el = $('#conn-banner');
   if (text) el.textContent = text;
@@ -989,10 +1007,7 @@ function renderMessages({ keepScroll = false } = {}) {
       time.textContent = timeOf(m.at);
       meta.append(time);
       if (mine) {
-        const ticks = document.createElement('span');
-        ticks.className = 'ticks' + (m.readAt ? ' read' : '');
-        ticks.textContent = m.readAt ? '✓✓' : '✓';
-        meta.append(ticks);
+        meta.append(eyeBadge(Boolean(m.readAt)));
       }
       bubble.append(meta);
     }
