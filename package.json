@@ -12,6 +12,7 @@
     "media": "node media.js",
     "test": "node tools/smoke.mjs",
     "test:persistence": "node tools/persistence-test.mjs",
-    "test:ui": "node tools/ui-test.mjs"
+    "test:ui": "node tools/ui-test.mjs",
+    "pages": "node tools/make-pages.mjs"
   }
 }
