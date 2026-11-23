@@ -170,19 +170,146 @@ function requireUser(req, url) {
   return { token, user: publicUser(row) };
 }
 
-/* ─────────────────────── онлайн / SSE ─────────────────────── */
+/* ─────────────────────── онлайн: WebSocket + SSE ─────────────────────── */
 
-/** userId → Set<ServerResponse> (несколько вкладок — нормально) */
+/** userId → Set<ServerResponse> (SSE, несколько вкладок — нормально) */
 const streams = new Map();
-/** userId → время последнего запроса; работает, когда SSE заблокирован прокси */
+/** userId → Set<net.Socket> (WebSocket — основной канал: Cloudflare пропускает его, а SSE нет) */
+const sockets = new Map();
+/** userId → время последнего запроса; работает, когда поток вообще недоступен */
 const presence = new Map();
 const PRESENCE_TTL = 45000;
+
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+
+function wsAccept(key) {
+  return crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
+}
+
+/** Кадр WebSocket (сервер → клиент, без маски). */
+function wsFrame(opcode, payload) {
+  const data = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, 'utf8');
+  const len = data.length;
+  let header;
+  if (len < 126) {
+    header = Buffer.from([0x80 | opcode, len]);
+  } else if (len < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x80 | opcode;
+    header[1] = 126;
+    header.writeUInt16BE(len, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x80 | opcode;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(len), 2);
+  }
+  return Buffer.concat([header, data]);
+}
+
+function wsSend(userId, event, data) {
+  const set = sockets.get(userId);
+  if (!set) return;
+  const frame = wsFrame(0x1, JSON.stringify({ event, data }));
+  for (const socket of set) {
+    try {
+      socket.write(frame);
+    } catch {
+      /* соединение закроется само */
+    }
+  }
+}
+
+function wsBroadcastAll(event, data) {
+  const frame = wsFrame(0x1, JSON.stringify({ event, data }));
+  for (const set of sockets.values()) {
+    for (const socket of set) {
+      try {
+        socket.write(frame);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+function wsRegister(userId, socket) {
+  let set = sockets.get(userId);
+  if (!set) {
+    set = new Set();
+    sockets.set(userId, set);
+  }
+  set.add(socket);
+}
+
+function wsUnregister(userId, socket) {
+  const set = sockets.get(userId);
+  if (!set) return false;
+  set.delete(socket);
+  if (set.size === 0) {
+    sockets.delete(userId);
+    return true;
+  }
+  return false;
+}
+
+/** Разбор входящих кадров: клиент присылает только короткие JSON-сообщения. */
+function wsOnData(socket, onText) {
+  let buffer = Buffer.alloc(0);
+  return (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    while (buffer.length >= 2) {
+      const opcode = buffer[0] & 0x0f;
+      const masked = (buffer[1] & 0x80) !== 0;
+      let len = buffer[1] & 0x7f;
+      let offset = 2;
+
+      if (len === 126) {
+        if (buffer.length < 4) return;
+        len = buffer.readUInt16BE(2);
+        offset = 4;
+      } else if (len === 127) {
+        if (buffer.length < 10) return;
+        len = Number(buffer.readBigUInt64BE(2));
+        offset = 10;
+      }
+
+      const maskLen = masked ? 4 : 0;
+      if (buffer.length < offset + maskLen + len) return;
+
+      const mask = masked ? buffer.subarray(offset, offset + 4) : null;
+      const payload = Buffer.from(buffer.subarray(offset + maskLen, offset + maskLen + len));
+      if (mask) for (let i = 0; i < payload.length; i += 1) payload[i] ^= mask[i % 4];
+      buffer = buffer.subarray(offset + maskLen + len);
+
+      if (opcode === 0x8) {
+        try {
+          socket.end(wsFrame(0x8, Buffer.alloc(0)));
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      if (opcode === 0x9) {
+        try {
+          socket.write(wsFrame(0xa, payload));
+        } catch {
+          /* ignore */
+        }
+        continue;
+      }
+      if (opcode === 0x1) onText(payload.toString('utf8'));
+    }
+  };
+}
 
 function sseSend(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
 function broadcastTo(userId, event, data) {
+  wsSend(userId, event, data);
+
   const set = streams.get(userId);
   if (!set) return;
   for (const res of set) {
@@ -195,6 +322,8 @@ function broadcastTo(userId, event, data) {
 }
 
 function broadcastAll(event, data) {
+  wsBroadcastAll(event, data);
+
   for (const set of streams.values()) {
     for (const res of set) {
       try {
@@ -208,7 +337,7 @@ function broadcastAll(event, data) {
 
 const onlineIds = () => {
   const nowTs = Date.now();
-  const ids = new Set(streams.keys());
+  const ids = new Set([...streams.keys(), ...sockets.keys()]);
   for (const [id, ts] of presence) {
     if (nowTs - ts <= PRESENCE_TTL) ids.add(id);
     else presence.delete(id);
@@ -514,6 +643,77 @@ function serveStatic(res, pathname) {
 
 /* ─────────────────────── сервер ─────────────────────── */
 
+/** WebSocket-канал: тот же токен, что и у остального API. */
+function handleUpgrade(req, socket) {
+  const url = new URL(req.url, 'http://localhost');
+  const key = req.headers['sec-websocket-key'];
+
+  if (url.pathname !== '/api/ws' || !key) {
+    socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  const token = url.searchParams.get('token') || '';
+  const row = token ? q.session.get(token) : null;
+  if (!row) {
+    socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  socket.write(
+    [
+      'HTTP/1.1 101 Switching Protocols',
+      'Upgrade: websocket',
+      'Connection: Upgrade',
+      `Sec-WebSocket-Accept: ${wsAccept(key)}`,
+      '',
+      '',
+    ].join('\r\n'),
+  );
+  socket.setNoDelay(true);
+
+  const user = publicUser(row);
+  const wasOnline = onlineIds().includes(user.id);
+  wsRegister(user.id, socket);
+  touchPresence(user.id);
+  wsSend(user.id, 'ready', { me: user, online: onlineIds() });
+  if (!wasOnline) broadcastAll('presence', { userId: user.id, online: true });
+
+  // чтобы прокси не рвал простаивающее соединение
+  const ping = setInterval(() => {
+    try {
+      socket.write(wsFrame(0x9, Buffer.alloc(0)));
+    } catch {
+      /* закрывается */
+    }
+  }, 30000);
+
+  socket.on(
+    'data',
+    wsOnData(socket, (text) => {
+      try {
+        const msg = JSON.parse(text);
+        if (msg && msg.type === 'ping') wsSend(user.id, 'pong', { at: Date.now() });
+      } catch {
+        /* мусор игнорируем */
+      }
+    }),
+  );
+
+  const cleanup = () => {    clearInterval(ping);
+    const last = wsUnregister(user.id, socket);
+    if (last && !streams.has(user.id)) {
+      presence.delete(user.id);
+      broadcastAll('presence', { userId: user.id, online: false });
+    }
+  };
+
+  socket.on('close', cleanup);
+  socket.on('error', cleanup);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const { pathname } = url;
@@ -710,6 +910,8 @@ function shutdown() {
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 process.on('exit', () => mediaChild?.kill());
+
+server.on('upgrade', handleUpgrade);
 
 server.listen(PORT, HOST, () => {
   const { users } = db.prepare('SELECT COUNT(*) AS users FROM users').get();

@@ -41,6 +41,7 @@ const state = {
   threads: new Map(), // peerId → { messages: [], hasMore: false }
   filter: '',
   es: null,
+  ws: null,
   typingUntil: 0,
   typingSentAt: 0,
   typingTimer: null,
@@ -500,8 +501,7 @@ async function enterChat() {
 
 function signOut(notifyServer = true) {
   if (notifyServer && state.token) api('/api/auth/logout', { method: 'POST' }).catch(() => {});
-  state.es?.close();
-  state.es = null;
+  closeStream();
   state.token = '';
   state.me = null;
   state.users = [];
@@ -522,29 +522,24 @@ $('#logout').addEventListener('click', () => signOut());
 
 /* ───────────────────────── события сервера ───────────────────────── */
 
-function connectStream() {
-  state.es?.close();
-  const es = new EventSource(apiUrl(`/api/events?token=${encodeURIComponent(state.token)}`));
-  state.es = es;
+/** Один обработчик на оба канала: WebSocket (основной) и SSE (резервный). */
+function handleEvent(name, data) {
+  markStreamAlive();
 
-  // любой пришедший пакет — признак, что поток жив
-  for (const name of ['ready', 'message', 'typing', 'read', 'presence', 'profile']) {
-    es.addEventListener(name, markStreamAlive);
-  }
-
-  es.addEventListener('ready', (event) => {
-    const data = JSON.parse(event.data);
+  if (name === 'ready') {
     if (data.me) state.me = { ...state.me, ...data.me };
     state.online = new Set(data.online || []);
-    banner(false);
     renderOnline();
     renderList();
-  });
+    return;
+  }
 
-  es.addEventListener('message', (event) => onIncoming(JSON.parse(event.data)));
+  if (name === 'message') {
+    onIncoming(data);
+    return;
+  }
 
-  es.addEventListener('typing', (event) => {
-    const data = JSON.parse(event.data);
+  if (name === 'typing') {
     if (data.from !== state.activeId) return;
     state.typingUntil = Date.now() + 3200;
     $('#typing-text').textContent = `${data.name} печатает…`;
@@ -553,10 +548,10 @@ function connectStream() {
     state.typingTimer = setTimeout(() => {
       $('#typing').hidden = true;
     }, 3200);
-  });
+    return;
+  }
 
-  es.addEventListener('read', (event) => {
-    const data = JSON.parse(event.data);
+  if (name === 'read') {
     if (data.by !== state.activeId) return;
     const thread = state.threads.get(data.by);
     if (!thread) return;
@@ -568,18 +563,18 @@ function connectStream() {
       }
     }
     if (changed) renderMessages({ keepScroll: true });
-  });
+    return;
+  }
 
-  es.addEventListener('presence', (event) => {
-    const data = JSON.parse(event.data);
+  if (name === 'presence') {
     if (data.online) state.online.add(data.userId);
     else state.online.delete(data.userId);
     renderOnline();
     renderList();
-  });
+    return;
+  }
 
-  es.addEventListener('profile', (event) => {
-    const data = JSON.parse(event.data);
+  if (name === 'profile') {
     if (state.me && data.userId === state.me.id) {
       state.me.avatarId = data.avatarId;
       paintAvatar($('#me-avatar'), state.me);
@@ -590,21 +585,141 @@ function connectStream() {
       renderList();
       if (state.activeId === data.userId) renderHead(user);
     }
+  }
+}
+
+function closeStream() {
+  try {
+    state.ws?.close();
+  } catch {
+    /* уже закрыт */
+  }
+  state.ws = null;
+  try {
+    state.es?.close();
+  } catch {
+    /* уже закрыт */
+  }
+  state.es = null;
+}
+
+function connectStream() {
+  closeStream();
+  connectSocket();
+}
+
+function socketUrl() {
+  const base = API_BASE
+    ? API_BASE.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:')
+    : `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`;
+  return `${base}/api/ws?token=${encodeURIComponent(state.token)}`;
+}
+
+/**
+ * Основной канал — WebSocket: туннели и прокси пропускают его, а SSE часто держат
+ * в буфере. Если подключиться не вышло — переходим на SSE, затем на опрос.
+ */
+function connectSocket() {
+  if (typeof WebSocket === 'undefined' || !state.token) {
+    connectEvents();
+    return;
+  }
+
+  let ws;
+  try {
+    ws = new WebSocket(socketUrl());
+  } catch {
+    connectEvents();
+    return;
+  }
+  state.ws = ws;
+
+  const giveUp = () => {
+    if (state.ws !== ws) return;
+    state.ws = null;
+    connectEvents();
+  };
+
+  const timer = setTimeout(() => {
+    if (ws.readyState !== 1) {
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+      giveUp();
+    }
+  }, 4000);
+
+  ws.addEventListener('open', () => {
+    clearTimeout(timer);
+    markStreamAlive();
+    try {
+      state.es?.close();
+    } catch {
+      /* ignore */
+    }
+    state.es = null;
   });
 
+  ws.addEventListener('message', (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg && msg.event) handleEvent(msg.event, msg.data);
+    } catch {
+      /* не наш пакет */
+    }
+  });
+
+  ws.addEventListener('close', () => {
+    clearTimeout(timer);
+    setTimeout(giveUp, 600);
+  });
+
+  ws.addEventListener('error', () => {
+    /* следом придёт close */
+  });
+}
+
+/** Резервный канал: SSE. */
+function connectEvents() {
+  if (state.es) return;
+  const es = new EventSource(apiUrl(`/api/events?token=${encodeURIComponent(state.token)}`));
+  state.es = es;
+
+  for (const name of ['ready', 'message', 'typing', 'read', 'presence', 'profile']) {
+    es.addEventListener(name, (event) => {
+      try {
+        handleEvent(name, JSON.parse(event.data));
+      } catch {
+        /* ignore */
+      }
+    });
+  }
+
   es.addEventListener('error', () => {
-    banner(true);
     state.streamErrors = (state.streamErrors || 0) + 1;
     if (state.streamErrors >= 5) {
       state.streamErrors = 0;
-      signOut(false);
+      try {
+        es.close();
+      } catch {
+        /* ignore */
+      }
+      state.es = null;
+      setTimeout(() => state.me && connectSocket(), 2000);
     }
   });
+
   es.onopen = () => {
     state.streamErrors = 0;
-    banner(false);
   };
 }
+
+/** Раз в полминуты пробуем вернуться на быстрый канал. */
+setInterval(() => {
+  if (state.me && !state.ws) connectSocket();
+}, 30000);
 
 function onIncoming(message) {
   const peerId = message.from === state.me.id ? message.to : message.from;
@@ -667,19 +782,20 @@ async function pollOnce() {
 
 setInterval(async () => {
   if (!state.me) return;
+  // быстрый канал жив — опрос не нужен
+  if (state.ws && state.ws.readyState === 1) {
+    state.polling = false;
+    return;
+  }
   if (Date.now() - state.lastEventAt > 8000) {
-    if (!state.polling) {
-      state.polling = true;
-      banner(true, 'Поток событий недоступен — обновляю опросом');
-      setTimeout(() => {
-        if (state.polling) banner(false);
-      }, 6000);
-    }
+    state.polling = true;
     try {
       await pollOnce();
     } catch {
       /* сеть моргнула, попробуем на следующем тике */
     }
+  } else {
+    state.polling = false;
   }
 }, 1500);
 
@@ -1172,5 +1288,6 @@ async function boot() {
 
 // отладочная ручка: из консоли видно состояние (и удобно проверять автотестами)
 window.__volna = state;
+window.__volnaApi = API_BASE;
 
 boot();
