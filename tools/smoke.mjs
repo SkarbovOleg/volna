@@ -129,7 +129,14 @@ const controller = new AbortController();
 const stream = await fetch(`${BASE}/api/events?token=${aliceToken}`, { signal: controller.signal });
 check('SSE-поток открыт', stream.status === 200 && stream.headers.get('content-type').includes('text/event-stream'));
 const reader = stream.body.getReader();
-const firstChunk = new TextDecoder().decode((await reader.read()).value);
+// поток может прийти несколькими кусками (сначала прогревочный блок), собираем до ready
+let firstChunk = '';
+const deadline = Date.now() + 3000;
+while (!firstChunk.includes('event: ready') && Date.now() < deadline) {
+  const { value, done } = await reader.read();
+  if (done) break;
+  firstChunk += new TextDecoder().decode(value);
+}
 check('SSE прислал ready', firstChunk.includes('event: ready') && firstChunk.includes('online'));
 controller.abort();
 

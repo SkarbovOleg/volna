@@ -166,6 +166,7 @@ function requireUser(req, url) {
   if (!token) throw new HttpError(401, 'Нужен вход');
   const row = q.session.get(token);
   if (!row) throw new HttpError(401, 'Сессия истекла');
+  touchPresence(row.id);
   return { token, user: publicUser(row) };
 }
 
@@ -173,6 +174,9 @@ function requireUser(req, url) {
 
 /** userId → Set<ServerResponse> (несколько вкладок — нормально) */
 const streams = new Map();
+/** userId → время последнего запроса; работает, когда SSE заблокирован прокси */
+const presence = new Map();
+const PRESENCE_TTL = 45000;
 
 function sseSend(res, event, data) {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -202,7 +206,20 @@ function broadcastAll(event, data) {
   }
 }
 
-const onlineIds = () => [...streams.keys()];
+const onlineIds = () => {
+  const nowTs = Date.now();
+  const ids = new Set(streams.keys());
+  for (const [id, ts] of presence) {
+    if (nowTs - ts <= PRESENCE_TTL) ids.add(id);
+    else presence.delete(id);
+  }
+  return [...ids];
+};
+
+/** Клиент без SSE (прокси держит поток) всё равно «онлайн», пока ходит запросами. */
+function touchPresence(userId) {
+  presence.set(Number(userId), Date.now());
+}
 
 function setOnline(userId, res) {
   let set = streams.get(userId);
@@ -523,6 +540,7 @@ const server = http.createServer(async (req, res) => {
         res.write(`: ${'·'.repeat(2048)}\n\n`);
         const fresh = !streams.has(user.id);
         setOnline(user.id, res);
+        touchPresence(user.id);
         sseSend(res, 'ready', { me: user, online: onlineIds() });
         if (fresh) broadcastAll('presence', { userId: user.id, online: true });
 
@@ -537,7 +555,10 @@ const server = http.createServer(async (req, res) => {
         req.on('close', () => {
           clearInterval(ping);
           const wasLast = setOffline(user.id, res);
-          if (wasLast) broadcastAll('presence', { userId: user.id, online: false });
+          if (wasLast) {
+            presence.delete(user.id);
+            broadcastAll('presence', { userId: user.id, online: false });
+          }
         });
         return;
       }
