@@ -518,6 +518,9 @@ const server = http.createServer(async (req, res) => {
           'x-accel-buffering': 'no',
         });
         res.write('retry: 2000\n\n');
+        // Cloudflare и другие прокси копят ответ, пока буфер мал: отдаём «пустой» блок,
+        // чтобы браузер сразу получил поток. Клиент эти строки-комментарии игнорирует.
+        res.write(`: ${'·'.repeat(2048)}\n\n`);
         const fresh = !streams.has(user.id);
         setOnline(user.id, res);
         sseSend(res, 'ready', { me: user, online: onlineIds() });
@@ -529,7 +532,7 @@ const server = http.createServer(async (req, res) => {
           } catch {
             /* ignore */
           }
-        }, 25000);
+        }, 10000);
 
         req.on('close', () => {
           clearInterval(ping);
@@ -563,7 +566,7 @@ const server = http.createServer(async (req, res) => {
       /* ── чаты ── */
       if (pathname === '/api/users' && req.method === 'GET') {
         const { user } = requireUser(req, url);
-        return sendJson(res, 200, { users: contacts(user.id) });
+        return sendJson(res, 200, { users: contacts(user.id), online: onlineIds() });
       }
       if (pathname === '/api/messages' && req.method === 'GET') {
         const { user } = requireUser(req, url);

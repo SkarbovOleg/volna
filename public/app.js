@@ -22,6 +22,8 @@ const state = {
   audio: null,
   pending: null, // фото, готовое к отправке
   authAvatar: null, // фото, выбранное при регистрации
+  lastEventAt: Date.now(), // когда последний раз что-то пришло по SSE
+  polling: false, // SSE молчит (прокси/туннель) → добираем опросом
 };
 
 /* ───────────────────────── сеть ───────────────────────── */
@@ -112,8 +114,10 @@ function makeAvatar(user, extraClass = '') {
   return el;
 }
 
-function banner(show) {
-  $('#conn-banner').hidden = !show;
+function banner(show, text) {
+  const el = $('#conn-banner');
+  if (text) el.textContent = text;
+  el.hidden = !show;
 }
 
 function beep() {
@@ -426,6 +430,11 @@ function connectStream() {
   const es = new EventSource(`/api/events?token=${encodeURIComponent(state.token)}`);
   state.es = es;
 
+  // любой пришедший пакет — признак, что поток жив
+  for (const name of ['ready', 'message', 'typing', 'read', 'presence', 'profile']) {
+    es.addEventListener(name, markStreamAlive);
+  }
+
   es.addEventListener('ready', (event) => {
     const data = JSON.parse(event.data);
     if (data.me) state.me = { ...state.me, ...data.me };
@@ -525,10 +534,63 @@ function onIncoming(message) {
 
 /* ───────────────────────── данные ───────────────────────── */
 
+function markStreamAlive() {
+  state.lastEventAt = Date.now();
+  if (state.polling) {
+    state.polling = false;
+    banner(false);
+  }
+}
+
+/**
+ * Некоторые прокси (например, Cloudflare) держат SSE в буфере и не отдают ни байта.
+ * Если поток молчит — переходим на опрос раз в 1.5 секунды, и всё равно всё доезжает.
+ */
+async function pollOnce() {
+  await loadUsers();
+  const peerId = state.activeId;
+  if (!peerId) return;
+  const thread = state.threads.get(peerId);
+  if (!thread) return;
+
+  const lastId = thread.messages.length ? thread.messages[thread.messages.length - 1].id : 0;
+  const data = await api(`/api/messages?userId=${peerId}&limit=40`);
+  const fresh = data.messages.filter((message) => message.id > lastId);
+  if (!fresh.length) return;
+
+  thread.messages.push(...fresh);
+  thread.messages.sort((a, b) => a.id - b.id);
+  renderMessages();
+  scrollToBottom();
+  if (fresh.some((message) => message.from !== state.me.id)) {
+    beep();
+    markRead(peerId);
+  }
+}
+
+setInterval(async () => {
+  if (!state.me) return;
+  if (Date.now() - state.lastEventAt > 8000) {
+    if (!state.polling) {
+      state.polling = true;
+      banner(true, 'Поток событий недоступен — обновляю опросом');
+      setTimeout(() => {
+        if (state.polling) banner(false);
+      }, 6000);
+    }
+    try {
+      await pollOnce();
+    } catch {
+      /* сеть моргнула, попробуем на следующем тике */
+    }
+  }
+}, 1500);
+
 async function loadUsers() {
   try {
     const data = await api('/api/users');
     state.users = data.users;
+    if (Array.isArray(data.online)) state.online = new Set(data.online);
     for (const user of data.users) {
       if (user.online) state.online.add(user.id);
       else state.online.delete(user.id);
@@ -999,5 +1061,8 @@ async function boot() {
     localStorage.removeItem('volna.token');
   }
 }
+
+// отладочная ручка: из консоли видно состояние (и удобно проверять автотестами)
+window.__volna = state;
 
 boot();
