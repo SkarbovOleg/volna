@@ -236,5 +236,68 @@ check('аватар виден собеседнику', bobCard4 && bobCard4.ava
 const usersPreview = usersAfterAvatar.data.users.find((u) => u.id === bobId);
 check('в превью чата отмечено фото', usersPreview.lastKind === 'photo', `(${usersPreview.lastKind})`);
 
+/* ─────────────── группы ─────────────── */
+
+const group = await call('/api/groups', {
+  method: 'POST',
+  token: aliceToken,
+  body: { title: 'Тестовая группа', memberIds: [bobId] },
+});
+check('группа создана', group.status === 201 && group.data.group.members.length === 2, `(${group.status})`);
+const groupId = group.data.group.id;
+
+const shortTitle = await call('/api/groups', { method: 'POST', token: aliceToken, body: { title: 'x', memberIds: [bobId] } });
+check('короткое название отклонено', shortTitle.status === 400);
+
+const solo = await call('/api/groups', { method: 'POST', token: aliceToken, body: { title: 'Один', memberIds: [] } });
+check('группа без участников отклонена', solo.status === 400);
+
+const bobGroups = (await call('/api/users', { token: bobToken })).data.groups || [];
+check('группа видна второму участнику', bobGroups.some((g) => g.id === groupId));
+
+const groupMsg = await call('/api/messages', {
+  method: 'POST',
+  token: bobToken,
+  body: { group: groupId, body: 'привет группе' },
+});
+check('сообщение в группу', groupMsg.status === 201 && groupMsg.data.message.fromName, `(${groupMsg.status})`);
+
+const groupSticker = await call('/api/messages', {
+  method: 'POST',
+  token: aliceToken,
+  body: { group: groupId, sticker: 'party' },
+});
+check('стикер в группу', groupSticker.status === 201 && groupSticker.data.message.kind === 'sticker');
+
+const groupHist = await call(`/api/messages?groupId=${groupId}`, { token: aliceToken });
+check('история группы', groupHist.status === 200 && groupHist.data.messages.length === 2);
+check('в истории есть название группы', groupHist.data.group.title === 'Тестовая группа');
+
+const aliceCard = (await call('/api/users', { token: aliceToken })).data.groups.find((g) => g.id === groupId);
+check('непрочитанные в группе', aliceCard.unread === 1, `(${aliceCard.unread})`);
+
+await call('/api/read', { method: 'POST', token: aliceToken, body: { groupId } });
+const aliceCard2 = (await call('/api/users', { token: aliceToken })).data.groups.find((g) => g.id === groupId);
+check('прочтение группы сбрасывает счётчик', aliceCard2.unread === 0);
+
+const strangerPost = await call('/api/messages', {
+  method: 'POST',
+  token: bobToken,
+  body: { group: groupId + 999, body: 'нет такой группы' },
+});
+check('сообщение в несуществующую группу → 404', strangerPost.status === 404, `(${strangerPost.status})`);
+
+const leave = await call(`/api/groups/${groupId}/leave`, { method: 'POST', token: bobToken });
+check('выход из группы', leave.status === 200);
+const afterLeave = (await call('/api/users', { token: bobToken })).data.groups || [];
+check('после выхода группы нет', !afterLeave.some((g) => g.id === groupId));
+
+const afterLeavePost = await call('/api/messages', {
+  method: 'POST',
+  token: bobToken,
+  body: { group: groupId, body: 'я уже вышел' },
+});
+check('после выхода писать нельзя → 403', afterLeavePost.status === 403, `(${afterLeavePost.status})`);
+
 console.log(`\n  итого: ${passed} ok, ${failed} fail\n`);
 process.exit(failed ? 1 : 0);

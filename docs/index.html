@@ -102,6 +102,11 @@
             <div class="me-name" id="me-name">—</div>
             <div class="me-status">в сети</div>
           </div>
+          <button class="icon-btn" id="new-group" title="Создать группу" aria-label="Создать группу">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
           <button class="icon-btn" id="logout" title="Выйти" aria-label="Выйти">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <path d="M15 17l5-5-5-5" />
@@ -141,7 +146,7 @@
         </div>
 
         <div id="conversation" class="conversation" hidden>
-          <header class="conv-head">
+          <header class="conv-head" id="conv-head">
             <button class="icon-btn back" id="back" title="Назад" aria-label="Назад">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                 <path d="M15 19l-7-7 7-7" />
@@ -152,6 +157,14 @@
               <div class="conv-name" id="peer-name">—</div>
               <div class="conv-status" id="peer-status">не в сети</div>
             </div>
+            <button class="icon-btn" id="group-info" title="Участники группы" aria-label="Участники группы" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="9" cy="8" r="3.4" />
+                <path d="M3.5 19c.6-3.2 3-5 5.5-5s4.9 1.8 5.5 5" />
+                <circle cx="17" cy="9" r="2.6" />
+                <path d="M15.5 14.4c2.6-.3 4.6 1.5 5 4.6" />
+              </svg>
+            </button>
           </header>
 
           <div id="messages" class="messages" tabindex="0"></div>
@@ -208,6 +221,21 @@
 
       <div id="conn-banner" class="conn-banner" hidden>Переподключение…</div>
     </section>
+
+    <div id="modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-card">
+        <header class="modal-head">
+          <h3 id="modal-title">Новая группа</h3>
+          <button class="icon-btn" id="modal-close" aria-label="Закрыть">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </header>
+        <div id="modal-body" class="modal-body"></div>
+        <footer id="modal-foot" class="modal-foot"></footer>
+      </div>
+    </div>
 
     <div id="lightbox" class="lightbox" hidden role="dialog" aria-label="Фотография">
       <img id="lightbox-img" alt="" />

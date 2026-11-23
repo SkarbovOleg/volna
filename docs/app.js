@@ -36,11 +36,39 @@ const apiUrl = (path) => `${API_BASE}${path}`;
 const STICKERS = ['smile', 'laugh', 'love', 'sad', 'angry', 'sleepy', 'cool', 'party'];
 const stickerSrc = (id) => `./stickers/${id}.svg`;
 
+/* Ключ чата: 'u:12' — человек, 'g:3' — группа. */
+const keyOfUser = (id) => `u:${id}`;
+const keyOfGroup = (id) => `g:${id}`;
+
+function parseKey(key) {
+  const type = key && key[0] === 'g' ? 'group' : 'user';
+  return { type, id: Number(key ? key.slice(2) : 0) };
+}
+
+function historyPath(key, params = {}) {
+  const { type, id } = parseKey(key);
+  const search = new URLSearchParams({
+    ...(type === 'group' ? { groupId: String(id) } : { userId: String(id) }),
+    limit: '40',
+    ...params,
+  });
+  return `/api/messages?${search}`;
+}
+
+function plural(n, one, few, many) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+  return many;
+}
+
 const state = {
   token: localStorage.getItem('volna.token') || '',
   me: null,
   users: [],
-  activeId: null,
+  groups: [],
+  activeKey: null,
   online: new Set(),
   threads: new Map(), // peerId → { messages: [], hasMore: false }
   filter: '',
@@ -326,10 +354,14 @@ function toggleStickers() {
 }
 
 async function sendSticker(id) {
-  const peerId = state.activeId;
-  if (!peerId) return;
+  const key = state.activeKey;
+  if (!key) return;
+  const { type, id: peerId } = parseKey(key);
   try {
-    const data = await api('/api/messages', { method: 'POST', body: { to: peerId, sticker: id } });
+    const data = await api('/api/messages', {
+      method: 'POST',
+      body: { ...(type === 'group' ? { group: peerId } : { to: peerId }), sticker: id },
+    });
     onIncoming(data.message);
     scrollToBottom();
   } catch (err) {
@@ -338,6 +370,186 @@ async function sendSticker(id) {
 }
 
 $('#stickers').addEventListener('click', toggleStickers);
+
+/* ───────────────────────── группы ───────────────────────── */
+
+function openModal(title) {
+  $('#modal-title').textContent = title;
+  $('#modal').hidden = false;
+}
+
+function closeModal() {
+  $('#modal').hidden = true;
+  $('#modal-body').replaceChildren();
+  $('#modal-foot').replaceChildren();
+}
+
+$('#modal-close').addEventListener('click', closeModal);
+$('#modal').addEventListener('click', (event) => {
+  if (event.target.id === 'modal') closeModal();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !$('#modal').hidden) closeModal();
+});
+
+function pickRow(user) {
+  const row = document.createElement('label');
+  row.className = 'pick-row';
+  const name = document.createElement('span');
+  name.textContent = user.name;
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.value = String(user.id);
+  row.append(makeAvatar(user), name, box);
+  return row;
+}
+
+async function showCreateGroup() {
+  if (!state.users.length) {
+    showToast('Пока нет собеседников — позови друга');
+    return;
+  }
+
+  openModal('Новая группа');
+  const body = $('#modal-body');
+  const foot = $('#modal-foot');
+
+  const input = document.createElement('input');
+  input.className = 'modal-input';
+  input.placeholder = 'Название группы';
+  input.maxLength = 60;
+  body.append(input);
+
+  const hint = document.createElement('p');
+  hint.className = 'modal-hint';
+  hint.textContent = 'Кого добавить:';
+  body.append(hint);
+
+  const list = document.createElement('div');
+  list.className = 'pick-list';
+  for (const user of state.users) list.append(pickRow(user));
+  body.append(list);
+
+  const create = document.createElement('button');
+  create.className = 'btn-primary';
+  create.type = 'button';
+  create.textContent = 'Создать';
+  create.addEventListener('click', async () => {
+    const memberIds = [...list.querySelectorAll('input:checked')].map((i) => Number(i.value));
+    try {
+      const data = await api('/api/groups', {
+        method: 'POST',
+        body: { title: input.value.trim(), memberIds },
+      });
+      closeModal();
+      await loadUsers();
+      openThread(keyOfGroup(data.group.id));
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+  foot.append(create);
+  input.focus();
+}
+
+async function showGroupInfo() {
+  const { type, id } = parseKey(state.activeKey);
+  if (type !== 'group') return;
+
+  try {
+    const data = await api(`/api/groups/${id}`);
+    const group = data.group;
+    openModal(group.title);
+
+    const body = $('#modal-body');
+    const foot = $('#modal-foot');
+
+    const hint = document.createElement('p');
+    hint.className = 'modal-hint';
+    hint.textContent = `${group.members.length} ${plural(group.members.length, 'участник', 'участника', 'участников')}`;
+    body.append(hint);
+
+    for (const member of group.members) {
+      const row = document.createElement('div');
+      row.className = 'member-row';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = member.name;
+      row.append(makeAvatar(member), name);
+
+      if (member.id === group.ownerId) {
+        const role = document.createElement('span');
+        role.className = 'role';
+        role.textContent = 'создатель';
+        row.append(role);
+      } else if (member.id === state.me.id) {
+        const role = document.createElement('span');
+        role.className = 'role';
+        role.textContent = 'ты';
+        row.append(role);
+      }
+      body.append(row);
+    }
+
+    if (group.ownerId === state.me.id) {
+      const candidates = state.users.filter((u) => !group.members.some((m) => m.id === u.id));
+      if (candidates.length) {
+        const addTitle = document.createElement('p');
+        addTitle.className = 'modal-hint';
+        addTitle.style.marginTop = '12px';
+        addTitle.textContent = 'Добавить участников:';
+        body.append(addTitle);
+
+        const list = document.createElement('div');
+        list.className = 'pick-list';
+        for (const user of candidates) list.append(pickRow(user));
+        body.append(list);
+
+        const add = document.createElement('button');
+        add.className = 'btn-primary';
+        add.type = 'button';
+        add.textContent = 'Добавить';
+        add.addEventListener('click', async () => {
+          const userIds = [...list.querySelectorAll('input:checked')].map((i) => Number(i.value));
+          if (!userIds.length) return;
+          try {
+            await api(`/api/groups/${id}/members`, { method: 'POST', body: { userIds } });
+            closeModal();
+            await loadUsers();
+            showGroupInfo();
+          } catch (err) {
+            showToast(err.message);
+          }
+        });
+        foot.append(add);
+      }
+    }
+
+    const leave = document.createElement('button');
+    leave.className = 'btn-ghost btn-danger';
+    leave.type = 'button';
+    leave.textContent = 'Покинуть группу';
+    leave.addEventListener('click', async () => {
+      try {
+        await api(`/api/groups/${id}/leave`, { method: 'POST' });
+        closeModal();
+        state.threads.delete(keyOfGroup(id));
+        state.activeKey = null;
+        $('#conversation').hidden = true;
+        $('#empty-state').hidden = false;
+        await loadUsers();
+      } catch (err) {
+        showToast(err.message);
+      }
+    });
+    foot.append(leave);
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
+$('#new-group').addEventListener('click', showCreateGroup);
+$('#group-info').addEventListener('click', showGroupInfo);
 
 /* ───────────────────────── лайтбокс ───────────────────────── */
 
@@ -555,7 +767,10 @@ async function enterChat() {
   }, 2500);
 
   const desktop = window.matchMedia('(min-width: 881px)').matches;
-  if (desktop && !state.activeId && state.users.length) openChat(state.users[0].id);
+  if (desktop && !state.activeKey) {
+    const first = chatItems()[0];
+    if (first) openThread(first.key);
+  }
 }
 
 function signOut(notifyServer = true) {
@@ -564,7 +779,8 @@ function signOut(notifyServer = true) {
   state.token = '';
   state.me = null;
   state.users = [];
-  state.activeId = null;
+  state.groups = [];
+  state.activeKey = null;
   state.threads.clear();
   state.online.clear();
   localStorage.removeItem('volna.token');
@@ -599,7 +815,8 @@ function handleEvent(name, data) {
   }
 
   if (name === 'typing') {
-    if (data.from !== state.activeId) return;
+    const key = data.group ? keyOfGroup(data.group) : keyOfUser(data.from);
+    if (key !== state.activeKey || data.from === state.me.id) return;
     state.typingUntil = Date.now() + 3200;
     $('#typing-text').textContent = `${data.name} печатает…`;
     $('#typing').hidden = false;
@@ -611,8 +828,8 @@ function handleEvent(name, data) {
   }
 
   if (name === 'read') {
-    if (data.by !== state.activeId) return;
-    const thread = state.threads.get(data.by);
+    if (state.activeKey !== keyOfUser(data.by)) return;
+    const thread = state.threads.get(state.activeKey);
     if (!thread) return;
     let changed = false;
     for (const m of thread.messages) {
@@ -633,6 +850,11 @@ function handleEvent(name, data) {
     return;
   }
 
+  if (name === 'chats') {
+    loadUsers();
+    return;
+  }
+
   if (name === 'profile') {
     if (state.me && data.userId === state.me.id) {
       state.me.avatarId = data.avatarId;
@@ -642,7 +864,7 @@ function handleEvent(name, data) {
     if (user) {
       user.avatarId = data.avatarId;
       renderList();
-      if (state.activeId === data.userId) renderHead(user);
+      if (state.activeKey === keyOfUser(data.userId)) renderHead();
     }
   }
 }
@@ -781,21 +1003,23 @@ setInterval(() => {
 }, 30000);
 
 function onIncoming(message) {
-  const peerId = message.from === state.me.id ? message.to : message.from;
-  const thread = ensureThread(peerId);
+  const key = message.group
+    ? keyOfGroup(message.group)
+    : keyOfUser(message.from === state.me.id ? message.to : message.from);
+  const thread = ensureThread(key);
   if (thread.messages.some((m) => m.id === message.id)) return;
   thread.messages.push(message);
   thread.messages.sort((a, b) => a.id - b.id);
 
-  if (peerId === state.activeId) {
+  if (key === state.activeKey) {
     renderMessages();
     scrollToBottom();
   }
 
   if (message.from !== state.me.id) {
     const focused = document.visibilityState === 'visible' && document.hasFocus();
-    if (peerId === state.activeId && focused) {
-      markRead(peerId);
+    if (key === state.activeKey && focused) {
+      markRead(key);
     } else {
       beep();
     }
@@ -819,13 +1043,13 @@ function markStreamAlive() {
  */
 async function pollOnce() {
   await loadUsers();
-  const peerId = state.activeId;
-  if (!peerId) return;
-  const thread = state.threads.get(peerId);
+  const key = state.activeKey;
+  if (!key) return;
+  const thread = state.threads.get(key);
   if (!thread) return;
 
   const lastId = thread.messages.length ? thread.messages[thread.messages.length - 1].id : 0;
-  const data = await api(`/api/messages?userId=${peerId}&limit=40`);
+  const data = await api(historyPath(key, { limit: 40 }));
   const fresh = data.messages.filter((message) => message.id > lastId);
   if (!fresh.length) return;
 
@@ -835,7 +1059,7 @@ async function pollOnce() {
   scrollToBottom();
   if (fresh.some((message) => message.from !== state.me.id)) {
     beep();
-    markRead(peerId);
+    markRead(key);
   }
 }
 
@@ -862,6 +1086,7 @@ async function loadUsers() {
   try {
     const data = await api('/api/users');
     state.users = data.users;
+    state.groups = data.groups || [];
     if (Array.isArray(data.online)) state.online = new Set(data.online);
     for (const user of data.users) {
       if (user.online) state.online.add(user.id);
@@ -869,63 +1094,68 @@ async function loadUsers() {
     }
     renderList();
     renderOnline();
-    if (state.activeId) {
-      const peer = state.users.find((u) => u.id === state.activeId);
-      if (peer) renderHead(peer);
-    }
   } catch (err) {
     if (err.status !== 401) console.error(err);
   }
 }
 
-function ensureThread(peerId) {
-  let thread = state.threads.get(peerId);
+function ensureThread(key) {
+  let thread = state.threads.get(key);
   if (!thread) {
     thread = { messages: [], hasMore: false, loaded: false };
-    state.threads.set(peerId, thread);
+    state.threads.set(key, thread);
   }
   return thread;
 }
 
-async function openChat(peerId) {
-  if (!peerId) return;
-  const peer = state.users.find((u) => u.id === peerId);
-  state.activeId = peerId;
+async function openThread(key) {
+  if (!key) return;
+  const { type } = parseKey(key);
+  if (type === 'group' && !state.groups.some((g) => keyOfGroup(g.id) === key)) return;
+  if (type === 'user' && !state.users.some((u) => keyOfUser(u.id) === key)) return;
+
+  state.activeKey = key;
   document.body.classList.add('mobile-chat');
   $('#empty-state').hidden = true;
   $('#conversation').hidden = false;
-  if (peer) renderHead(peer);
-  renderList();
   $('#typing').hidden = true;
   hideStickers();
 
-  const thread = ensureThread(peerId);
+  renderHead();
+  renderList();
+
+  const thread = ensureThread(key);
   if (!thread.loaded) {
     try {
-      const data = await api(`/api/messages?userId=${peerId}&limit=40`);
+      const data = await api(historyPath(key));
       thread.messages = data.messages;
       thread.hasMore = data.hasMore;
       thread.loaded = true;
+      if (data.group) {
+        const existing = state.groups.find((g) => g.id === data.group.id);
+        if (existing) Object.assign(existing, { members: data.group.members.length });
+      }
     } catch (err) {
       console.error(err);
     }
   }
+
   renderMessages();
   scrollToBottom();
-  markRead(peerId);
+  markRead(key);
   $('#input').value = '';
   autoGrow();
   if (window.matchMedia('(min-width: 881px)').matches) $('#input').focus();
 }
 
 async function loadOlder() {
-  const peerId = state.activeId;
-  const thread = state.threads.get(peerId);
+  const key = state.activeKey;
+  const thread = state.threads.get(key);
   if (!thread || !thread.hasMore || !thread.messages.length) return;
   const before = thread.messages[0].id;
   const box = $('#messages');
   const prevHeight = box.scrollHeight;
-  const data = await api(`/api/messages?userId=${peerId}&before=${before}&limit=40`);
+  const data = await api(historyPath(key, { before: String(before) }));
   thread.messages = [...data.messages, ...thread.messages];
   thread.hasMore = data.hasMore;
   renderMessages({ keepScroll: true });
@@ -935,9 +1165,10 @@ async function loadOlder() {
 async function send(text) {
   const body = text.trim();
   const photo = state.pending;
-  if ((!body && !photo) || !state.activeId) return;
-  const peerId = state.activeId;
+  const key = state.activeKey;
+  if ((!body && !photo) || !key) return;
 
+  const { type, id } = parseKey(key);
   $('#input').value = '';
   autoGrow();
   $('#send').disabled = true;
@@ -952,7 +1183,7 @@ async function send(text) {
     }
     const data = await api('/api/messages', {
       method: 'POST',
-      body: { to: peerId, body, mediaId },
+      body: { ...(type === 'group' ? { group: id } : { to: id }), body, mediaId },
     });
     onIncoming(data.message);
     scrollToBottom();
@@ -968,55 +1199,107 @@ async function send(text) {
   }
 }
 
-async function markRead(peerId) {
-  const thread = state.threads.get(peerId);
+async function markRead(key) {
+  const { type, id } = parseKey(key);
+  const thread = state.threads.get(key);
+
   if (thread) {
     const at = Date.now();
     let changed = false;
     for (const m of thread.messages) {
-      if (m.from === peerId && !m.readAt) {
+      if (m.from === id && !m.readAt) {
         m.readAt = at;
         changed = true;
       }
     }
-    const user = state.users.find((u) => u.id === peerId);
-    if (user && user.unread) {
-      user.unread = 0;
+    const item = type === 'group' ? state.groups.find((g) => g.id === id) : state.users.find((u) => u.id === id);
+    if (item && item.unread) {
+      item.unread = 0;
       renderList();
     }
-    if (changed && peerId === state.activeId) renderMessages({ keepScroll: true });
+    if (changed && key === state.activeKey) renderMessages({ keepScroll: true });
   }
-  api('/api/read', { method: 'POST', body: { userId: peerId } }).catch(() => {});
+
+  const payload = type === 'group' ? { groupId: id } : { userId: id };
+  api('/api/read', { method: 'POST', body: payload }).catch(() => {});
 }
 
 /* ───────────────────────── отрисовка ───────────────────────── */
 
+/** Единый список чатов: люди и группы, по времени последнего сообщения. */
+function chatItems() {
+  const items = [];
+
+  for (const user of state.users) {
+    items.push({
+      key: keyOfUser(user.id),
+      type: 'user',
+      id: user.id,
+      title: user.name,
+      hue: user.hue,
+      avatarId: user.avatarId,
+      lastBody: user.lastBody,
+      lastKind: user.lastKind,
+      lastAt: user.lastAt,
+      lastFrom: user.lastFrom,
+      lastName: null,
+      unread: user.unread,
+      members: 0,
+      online: state.online.has(user.id),
+    });
+  }
+
+  for (const group of state.groups) {
+    items.push({
+      key: keyOfGroup(group.id),
+      type: 'group',
+      id: group.id,
+      title: group.title,
+      hue: group.hue,
+      avatarId: group.avatarId,
+      lastBody: group.lastBody,
+      lastKind: group.lastKind,
+      lastAt: group.lastAt,
+      lastFrom: group.lastFrom,
+      lastName: group.lastFromName,
+      unread: group.unread,
+      members: group.members,
+      online: false,
+    });
+  }
+
+  return items.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0) || a.title.localeCompare(b.title));
+}
+
 function renderList() {
   const list = $('#user-list');
   const filter = state.filter.toLowerCase();
-  const users = state.users.filter(
-    (u) =>
+  const items = chatItems().filter(
+    (item) =>
       !filter ||
-      u.name.toLowerCase().includes(filter) ||
-      (u.lastBody || '').toLowerCase().includes(filter),
+      item.title.toLowerCase().includes(filter) ||
+      (item.lastBody || '').toLowerCase().includes(filter),
   );
 
   list.replaceChildren();
-  if (!users.length) {
+  if (!items.length) {
     const empty = document.createElement('li');
     empty.className = 'list-empty';
-    empty.textContent = state.users.length ? 'Ничего не найдено' : 'Пока никого нет — позови друга';
+    empty.textContent = state.users.length || state.groups.length ? 'Ничего не найдено' : 'Пока никого нет — позови друга';
     list.append(empty);
   }
 
-  for (const user of users) {
+  for (const chat of items) {
     const item = document.createElement('li');
-    item.className = 'chat-item' + (user.id === state.activeId ? ' is-active' : '');
-    item.dataset.id = String(user.id);
+    item.className = 'chat-item' + (chat.key === state.activeKey ? ' is-active' : '');
+    item.dataset.key = chat.key;
     item.setAttribute('role', 'option');
-    item.setAttribute('aria-selected', String(user.id === state.activeId));
+    item.setAttribute('aria-selected', String(chat.key === state.activeKey));
 
-    const avatar = makeAvatar(user, state.online.has(user.id) ? 'online' : '');
+    const avatar = makeAvatar(
+      { name: chat.title, hue: chat.hue, avatarId: chat.avatarId },
+      chat.type === 'group' ? 'is-group' : chat.online ? 'online' : '',
+    );
     item.append(avatar);
 
     const body = document.createElement('div');
@@ -1026,28 +1309,35 @@ function renderList() {
     top.className = 'chat-top';
     const name = document.createElement('div');
     name.className = 'chat-name';
-    name.textContent = user.name;
+    name.textContent = chat.title;
+    if (chat.type === 'group') {
+      const tag = document.createElement('span');
+      tag.className = 'group-tag';
+      tag.textContent = 'группа';
+      name.append(tag);
+    }
     const time = document.createElement('div');
     time.className = 'chat-time';
-    time.textContent = shortTime(user.lastAt);
+    time.textContent = shortTime(chat.lastAt);
     top.append(name, time);
 
     const preview = document.createElement('div');
     preview.className = 'chat-preview';
-    if (user.lastAt && user.lastFrom === state.me.id) {
-      const prefix = document.createElement('span');
-      prefix.className = 'prefix';
-      prefix.textContent = 'Вы:';
-      preview.append(prefix);
-    }
-    const isPhoto = user.lastKind === 'photo';
-    const isSticker = user.lastKind === 'sticker';
+
+    const prefix = document.createElement('span');
+    prefix.className = 'prefix';
+    if (chat.lastAt && chat.lastFrom === state.me.id) prefix.textContent = 'Вы:';
+    else if (chat.lastAt && chat.type === 'group' && chat.lastName) prefix.textContent = `${chat.lastName}:`;
+    if (prefix.textContent) preview.append(prefix);
+
+    const isPhoto = chat.lastKind === 'photo';
+    const isSticker = chat.lastKind === 'sticker';
     const text = document.createElement('span');
     if (isSticker) text.textContent = 'Стикер';
-    else if (user.lastBody) text.textContent = isPhoto ? `📷 ${user.lastBody}` : user.lastBody;
+    else if (chat.lastBody) text.textContent = isPhoto ? `📷 ${chat.lastBody}` : chat.lastBody;
     else if (isPhoto) text.textContent = '📷 Фото';
     else {
-      text.textContent = 'Нет сообщений';
+      text.textContent = chat.type === 'group' ? 'Группа создана' : 'Нет сообщений';
       text.style.color = 'var(--muted-dim)';
     }
     preview.append(text);
@@ -1055,44 +1345,66 @@ function renderList() {
     body.append(top, preview);
     item.append(body);
 
-    if (user.unread > 0) {
+    if (chat.unread > 0) {
       const badge = document.createElement('span');
       badge.className = 'badge';
-      badge.textContent = user.unread > 99 ? '99+' : String(user.unread);
+      badge.textContent = chat.unread > 99 ? '99+' : String(chat.unread);
       item.append(badge);
     }
 
-    item.addEventListener('click', () => openChat(user.id));
+    item.addEventListener('click', () => openThread(chat.key));
     list.append(item);
   }
 
-  const total = state.users.reduce((sum, u) => sum + (u.unread || 0), 0);
+  const total = [...state.users, ...state.groups].reduce((sum, x) => sum + (x.unread || 0), 0);
   document.title = total > 0 ? `(${total}) Волна` : 'Волна';
 }
 
 function renderOnline() {
   $('#online-count').textContent = String(state.online.size);
-  if (!state.activeId) return;
-  const peer = state.users.find((u) => u.id === state.activeId);
-  if (peer) renderHead(peer);
+  renderHead();
 }
 
-function renderHead(peer) {
+function renderHead() {
+  const key = state.activeKey;
+  if (!key) return;
+  const { type, id } = parseKey(key);
+  const status = $('#peer-status');
+
+  if (type === 'group') {
+    const group = state.groups.find((g) => g.id === id);
+    if (!group) return;
+    paintAvatar($('#peer-avatar'), { name: group.title, hue: group.hue, avatarId: group.avatarId });
+    $('#peer-avatar').classList.remove('online');
+    $('#peer-avatar').classList.add('is-group');
+    $('#peer-name').textContent = group.title;
+    status.textContent = `${group.members} ${plural(group.members, 'участник', 'участника', 'участников')}`;
+    status.classList.remove('is-online');
+    $('#conv-head').classList.add('is-group');
+    $('#group-info').hidden = false;
+    return;
+  }
+
+  const peer = state.users.find((u) => u.id === id);
+  if (!peer) return;
+  $('#group-info').hidden = true;
   const online = state.online.has(peer.id) || peer.online;
   paintAvatar($('#peer-avatar'), peer);
+  $('#peer-avatar').classList.remove('is-group');
   $('#peer-avatar').classList.toggle('online', online);
   $('#peer-name').textContent = peer.name;
-  const status = $('#peer-status');
   status.textContent = online ? 'в сети' : 'не в сети';
   status.classList.toggle('is-online', online);
+  $('#conv-head').classList.remove('is-group');
 }
 
 const GROUP_MS = 5 * 60 * 1000;
 
 function renderMessages({ keepScroll = false } = {}) {
   const box = $('#messages');
-  const peerId = state.activeId;
-  const thread = state.threads.get(peerId);
+  const key = state.activeKey;
+  const thread = state.threads.get(key);
+  const { type: chatType, id: chatId } = parseKey(key);
   const stick = isNearBottom();
   const prevHeight = box.scrollHeight;
   const prevTop = box.scrollTop;
@@ -1145,13 +1457,25 @@ function renderMessages({ keepScroll = false } = {}) {
     row.dataset.id = String(m.id);
 
     if (!mine) {
-      const peer = state.users.find((u) => u.id === peerId) || { name: '?', hue: 232 };
-      const avatar = makeAvatar(peer, sameAsPrev ? 'hidden' : '');
+      const sender =
+        chatType === 'group'
+          ? { name: m.fromName || '?', hue: m.fromHue ?? 232, avatarId: m.fromAvatarId || null }
+          : state.users.find((u) => u.id === chatId) || { name: '?', hue: 232 };
+      const avatar = makeAvatar(sender, sameAsPrev ? 'hidden' : '');
       row.append(avatar);
     }
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
+
+    // в группе подписываем, кто написал
+    if (chatType === 'group' && !mine && !sameAsPrev) {
+      const author = document.createElement('span');
+      author.className = 'sender';
+      author.textContent = m.fromName || '?';
+      author.style.color = `hsl(${m.fromHue ?? 232} 62% 72%)`;
+      bubble.append(author);
+    }
 
     if (m.kind === 'sticker' && m.stickerId) {
       bubble.classList.add('is-sticker');
@@ -1275,10 +1599,15 @@ $('#input').addEventListener('keydown', (event) => {
 
 $('#input').addEventListener('input', () => {
   autoGrow();
-  if (!state.activeId) return;
+  const key = state.activeKey;
+  if (!key) return;
   if (Date.now() - state.typingSentAt < 1600) return;
   state.typingSentAt = Date.now();
-  api('/api/typing', { method: 'POST', body: { to: state.activeId } }).catch(() => {});
+  const { type, id } = parseKey(key);
+  api('/api/typing', {
+    method: 'POST',
+    body: type === 'group' ? { group: id } : { to: id },
+  }).catch(() => {});
 });
 
 $('#search').addEventListener('input', (event) => {
@@ -1302,18 +1631,18 @@ document.addEventListener('paste', async (event) => {
 
 $('#back').addEventListener('click', () => {
   document.body.classList.remove('mobile-chat');
-  state.activeId = null;
+  state.activeKey = null;
   $('#conversation').hidden = true;
   $('#empty-state').hidden = false;
   renderList();
 });
 
 window.addEventListener('focus', () => {
-  if (state.activeId && document.visibilityState === 'visible') markRead(state.activeId);
+  if (state.activeKey && document.visibilityState === 'visible') markRead(state.activeKey);
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && state.activeId) markRead(state.activeId);
+  if (document.visibilityState === 'visible' && state.activeKey) markRead(state.activeKey);
 });
 
 /* ───────────────────────── старт ───────────────────────── */

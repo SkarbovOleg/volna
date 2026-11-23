@@ -71,6 +71,38 @@ const q = {
   `),
 };
 
+/* ─────────────────────── группы ─────────────────────── */
+
+const gq = {
+  byId: db.prepare('SELECT * FROM groups WHERE id = ?'),
+  mine: db.prepare('SELECT g.* FROM groups g JOIN group_members m ON m.group_id = g.id AND m.user_id = ?'),
+  members: db.prepare(
+    `SELECT u.id, u.name, u.hue, u.avatar_media_id
+     FROM group_members gm JOIN users u ON u.id = gm.user_id
+     WHERE gm.group_id = ? ORDER BY gm.joined_at, u.id`,
+  ),
+  memberIds: db.prepare('SELECT user_id FROM group_members WHERE group_id = ?'),
+  isMember: db.prepare('SELECT 1 AS ok FROM group_members WHERE group_id = ? AND user_id = ?'),
+  create: db.prepare('INSERT INTO groups (title, hue, owner_id, created_at) VALUES (?, ?, ?, ?)'),
+  addMember: db.prepare('INSERT OR IGNORE INTO group_members (group_id, user_id, joined_at) VALUES (?, ?, ?)'),
+  removeMember: db.prepare('DELETE FROM group_members WHERE group_id = ? AND user_id = ?'),
+  insertMessage: db.prepare(
+    'INSERT INTO group_messages (group_id, sender_id, body, kind, media_id, sticker_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ),
+  messageById: db.prepare('SELECT * FROM group_messages WHERE id = ?'),
+  last: db.prepare('SELECT * FROM group_messages WHERE group_id = ? ORDER BY id DESC LIMIT 1'),
+  maxId: db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM group_messages WHERE group_id = ?'),
+  unread: db.prepare(
+    `SELECT COUNT(*) AS c FROM group_messages m
+     WHERE m.group_id = ? AND m.sender_id != ? AND m.id > COALESCE(
+       (SELECT up_to FROM group_reads WHERE group_id = ? AND user_id = ?), 0)`,
+  ),
+  markRead: db.prepare(
+    `INSERT INTO group_reads (group_id, user_id, up_to) VALUES (?, ?, ?)
+     ON CONFLICT(group_id, user_id) DO UPDATE SET up_to = MAX(up_to, excluded.up_to)`,
+  ),
+};
+
 /* ─────────────────────── утилиты ─────────────────────── */
 
 const hashPass = (password, salt) => crypto.scryptSync(password, salt, 32).toString('hex');
@@ -99,6 +131,140 @@ function publicMessage(row) {
     at: row.created_at,
     readAt: row.read_at,
   };
+}
+
+/* ─────────────────────── группы: данные и операции ─────────────────────── */
+
+function publicGroupMessage(row) {
+  const sender = q.userById.get(row.sender_id);
+  return {
+    id: row.id,
+    from: row.sender_id,
+    group: row.group_id,
+    body: row.body,
+    kind: row.kind || 'text',
+    mediaId: row.media_id || null,
+    stickerId: row.sticker_id || null,
+    at: row.created_at,
+    fromName: sender ? sender.name : '?',
+    fromHue: sender ? sender.hue : 232,
+    fromAvatarId: sender ? sender.avatar_media_id || null : null,
+  };
+}
+
+function groupInfo(groupId) {
+  const row = gq.byId.get(groupId);
+  if (!row) return null;
+  return {
+    id: row.id,
+    title: row.title,
+    hue: row.hue,
+    avatarId: row.avatar_media_id || null,
+    ownerId: row.owner_id,
+    members: gq.members.all(groupId).map(publicUser),
+  };
+}
+
+function myGroups(userId) {
+  return gq.mine
+    .all(userId)
+    .map((row) => {
+      const last = gq.last.get(row.id);
+      const members = gq.members.all(row.id).map(publicUser);
+      const sender = last ? members.find((m) => m.id === last.sender_id) : null;
+      return {
+        id: row.id,
+        title: row.title,
+        hue: row.hue,
+        avatarId: row.avatar_media_id || null,
+        members: members.length,
+        lastBody: last ? last.body : null,
+        lastKind: last ? last.kind || 'text' : null,
+        lastAt: last ? last.created_at : null,
+        lastFrom: last ? last.sender_id : null,
+        lastFromName: sender ? sender.name : null,
+        unread: gq.unread.get(row.id, userId, row.id, userId).c,
+      };
+    })
+    .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+}
+
+function broadcastGroup(groupId, event, data) {
+  for (const row of gq.memberIds.all(groupId)) broadcastTo(row.user_id, event, data);
+}
+
+function requireGroup(userId, groupId) {
+  const id = Number(groupId);
+  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, 'Не указана группа');
+  const group = groupInfo(id);
+  if (!group) throw new HttpError(404, 'Группа не найдена');
+  if (!gq.isMember.get(id, userId)) throw new HttpError(403, 'Ты не участник этой группы');
+  return group;
+}
+
+function createGroup(user, payload) {
+  const title = String(payload.title || '').trim().replace(/\s+/g, ' ');
+  if (title.length < 2 || title.length > 60) throw new HttpError(400, 'Название: от 2 до 60 символов');
+
+  const raw = Array.isArray(payload.memberIds) ? payload.memberIds : [];
+  const memberIds = [...new Set(raw.map(Number))].filter(
+    (id) => Number.isInteger(id) && id > 0 && id !== user.id && q.userById.get(id),
+  );
+  if (!memberIds.length) throw new HttpError(400, 'Добавь хотя бы одного участника');
+
+  const hue = Math.floor(Math.random() * 360);
+  const info = gq.create.run(title, hue, user.id, now());
+  const groupId = Number(info.lastInsertRowid);
+  gq.addMember.run(groupId, user.id, now());
+  for (const id of memberIds) gq.addMember.run(groupId, id, now());
+
+  for (const id of [user.id, ...memberIds]) broadcastTo(id, 'chats', { groupId });
+  return groupInfo(groupId);
+}
+
+function addGroupMembers(user, group, payload) {
+  if (group.ownerId !== user.id) throw new HttpError(403, 'Добавлять участников может создатель');
+  const raw = Array.isArray(payload.userIds) ? payload.userIds : [];
+  const ids = [...new Set(raw.map(Number))].filter(
+    (id) => Number.isInteger(id) && id > 0 && q.userById.get(id) && !gq.isMember.get(group.id, id),
+  );
+  if (!ids.length) throw new HttpError(400, 'Некого добавлять');
+
+  for (const id of ids) gq.addMember.run(group.id, id, now());
+  for (const row of gq.memberIds.all(group.id)) broadcastTo(row.user_id, 'chats', { groupId: group.id });
+  return groupInfo(group.id);
+}
+
+function leaveGroup(user, group) {
+  gq.removeMember.run(group.id, user.id);
+  broadcastTo(user.id, 'chats', { groupId: group.id });
+  for (const row of gq.memberIds.all(group.id)) broadcastTo(row.user_id, 'chats', { groupId: group.id });
+  return { ok: true };
+}
+
+function groupHistory(userId, groupId, before, limit) {
+  const group = requireGroup(userId, groupId);
+  const lim = Math.min(Math.max(Number(limit) || 40, 1), 100);
+  const rows = before
+    ? db
+        .prepare('SELECT * FROM group_messages WHERE group_id = ? AND id < ? ORDER BY id DESC LIMIT ?')
+        .all(group.id, before, lim)
+    : db.prepare('SELECT * FROM group_messages WHERE group_id = ? ORDER BY id DESC LIMIT ?').all(group.id, lim);
+
+  return {
+    group,
+    messages: withMedia(rows.map(publicGroupMessage).reverse()),
+    hasMore: rows.length === lim,
+  };
+}
+
+function sendGroupMessage(user, groupId, body, mediaId, stickerId) {
+  const group = requireGroup(user.id, groupId);
+  const kind = stickerId ? 'sticker' : mediaId ? 'photo' : 'text';
+  const info = gq.insertMessage.run(group.id, user.id, body, kind, mediaId, stickerId, now());
+  const message = withMedia([publicGroupMessage(gq.messageById.get(Number(info.lastInsertRowid)))])[0];
+  broadcastGroup(group.id, 'message', message);
+  return message;
 }
 
 class HttpError extends Error {
@@ -496,20 +662,23 @@ function sendMessage(user, payload) {
   if (!body && !mediaId && !stickerId) throw new HttpError(400, 'Пустое сообщение');
   if (body.length > MAX_TEXT) throw new HttpError(400, `Максимум ${MAX_TEXT} символов`);
 
+  // вложение проверяем одинаково для личных и групповых сообщений
+  if (mediaId) {
+    const media = q.mediaOwner.get(mediaId);
+    if (!media) throw new HttpError(400, 'Фотография не найдена');
+    if (media.owner_id !== user.id) throw new HttpError(403, 'Это чужое фото');
+  }
+
+  if (payload.group) {
+    return sendGroupMessage(user, payload.group, body, mediaId, stickerId);
+  }
+
   const to = Number(payload.to);
   if (!Number.isInteger(to) || to <= 0) throw new HttpError(400, 'Не указан получатель');
   if (!q.userById.get(to)) throw new HttpError(404, 'Нет такого пользователя');
   if (to === user.id) throw new HttpError(400, 'Нельзя писать самому себе');
 
-  let kind = 'text';
-  if (stickerId) kind = 'sticker';
-  if (mediaId) {
-    const media = q.mediaOwner.get(mediaId);
-    if (!media) throw new HttpError(400, 'Фотография не найдена');
-    if (media.owner_id !== user.id) throw new HttpError(403, 'Это чужое фото');
-    kind = 'photo';
-  }
-
+  const kind = stickerId ? 'sticker' : mediaId ? 'photo' : 'text';
   const info = q.insertMessage.run(user.id, to, body, kind, mediaId, stickerId, now());
   const message = withMedia([publicMessage(q.messageById.get(Number(info.lastInsertRowid)))])[0];
   broadcastTo(to, 'message', message);
@@ -531,6 +700,13 @@ function setAvatar(user, payload) {
 }
 
 function markRead(user, payload) {
+  if (payload.groupId) {
+    const group = requireGroup(user.id, payload.groupId);
+    const { id } = gq.maxId.get(group.id);
+    gq.markRead.run(group.id, user.id, id);
+    return { changed: 1, upTo: id };
+  }
+
   const peer = Number(payload.userId);
   if (!Number.isInteger(peer) || peer <= 0) throw new HttpError(400, 'Не указан собеседник');
   const at = now();
@@ -762,14 +938,24 @@ const server = http.createServer(async (req, res) => {
       /* ── чаты ── */
       if (pathname === '/api/users' && req.method === 'GET') {
         const { user } = requireUser(req, url);
-        return sendJson(res, 200, { users: contacts(user.id), online: onlineIds() });
+        return sendJson(res, 200, {
+          users: contacts(user.id),
+          groups: myGroups(user.id),
+          online: onlineIds(),
+        });
       }
       if (pathname === '/api/messages' && req.method === 'GET') {
         const { user } = requireUser(req, url);
-        const peer = Number(url.searchParams.get('userId'));
-        if (!Number.isInteger(peer) || peer <= 0) throw new HttpError(400, 'Нужен userId');
         const before = Number(url.searchParams.get('before')) || 0;
         const limit = Number(url.searchParams.get('limit')) || 40;
+
+        const groupId = Number(url.searchParams.get('groupId'));
+        if (Number.isInteger(groupId) && groupId > 0) {
+          return sendJson(res, 200, groupHistory(user.id, groupId, before, limit));
+        }
+
+        const peer = Number(url.searchParams.get('userId'));
+        if (!Number.isInteger(peer) || peer <= 0) throw new HttpError(400, 'Нужен userId или groupId');
         return sendJson(res, 200, history(user.id, peer, before, limit));
       }
       if (pathname === '/api/messages' && req.method === 'POST') {
@@ -784,10 +970,40 @@ const server = http.createServer(async (req, res) => {
         const { user } = requireUser(req, url);
         const payload = await readJson(req);
         const to = Number(payload.to);
-        if (Number.isInteger(to) && to > 0) {
-          broadcastTo(to, 'typing', { from: user.id, name: user.name, at: now() });
+        const group = Number(payload.group);
+        const at = now();
+
+        if (Number.isInteger(group) && group > 0 && gq.isMember.get(group, user.id)) {
+          broadcastGroup(group, 'typing', { from: user.id, name: user.name, group, at });
+        } else if (Number.isInteger(to) && to > 0) {
+          broadcastTo(to, 'typing', { from: user.id, name: user.name, at });
         }
         return sendJson(res, 200, { ok: true });
+      }
+
+      /* ── группы ── */
+      if (pathname === '/api/groups' && req.method === 'POST') {
+        const { user } = requireUser(req, url);
+        return sendJson(res, 201, { group: createGroup(user, await readJson(req)) });
+      }
+
+      const groupMatch = pathname.match(/^\/api\/groups\/(\d+)(\/members|\/leave)?$/);
+      if (groupMatch) {
+        const { user } = requireUser(req, url);
+        const groupId = Number(groupMatch[1]);
+        const action = groupMatch[2] || '';
+
+        if (action === '' && req.method === 'GET') {
+          return sendJson(res, 200, { group: requireGroup(user.id, groupId) });
+        }
+        if (action === '/members' && req.method === 'POST') {
+          const group = requireGroup(user.id, groupId);
+          return sendJson(res, 200, { group: addGroupMembers(user, group, await readJson(req)) });
+        }
+        if (action === '/leave' && req.method === 'POST') {
+          const group = requireGroup(user.id, groupId);
+          return sendJson(res, 200, leaveGroup(user, group));
+        }
       }
       if (pathname === '/api/health' && req.method === 'GET') {
         const { users } = db.prepare('SELECT COUNT(*) AS users FROM users').get();

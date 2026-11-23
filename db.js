@@ -48,6 +48,37 @@ CREATE TABLE IF NOT EXISTS media (
   height     INTEGER,
   created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS groups (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  title           TEXT NOT NULL,
+  hue             INTEGER NOT NULL,
+  owner_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  avatar_media_id TEXT,
+  created_at      INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS group_members (
+  group_id  INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  joined_at INTEGER NOT NULL,
+  PRIMARY KEY (group_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS group_messages (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id   INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  sender_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  body       TEXT NOT NULL DEFAULT '',
+  kind       TEXT NOT NULL DEFAULT 'text',
+  media_id   TEXT,
+  sticker_id TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_group_messages ON group_messages(group_id, id);
+CREATE TABLE IF NOT EXISTS group_reads (
+  group_id INTEGER NOT NULL,
+  user_id  INTEGER NOT NULL,
+  up_to    INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (group_id, user_id)
+);
 `;
 
 /** Добавляет колонку, если её ещё нет (для баз, созданных до обновления). */
@@ -69,5 +100,9 @@ export function openDb() {
   addColumn(db, 'messages', 'kind', "TEXT NOT NULL DEFAULT 'text'");
   addColumn(db, 'messages', 'media_id', 'TEXT');
   addColumn(db, 'messages', 'sticker_id', 'TEXT');
+  // таблицы групп могли появиться в более ранней версии без этих колонок
+  addColumn(db, 'group_messages', 'kind', "TEXT NOT NULL DEFAULT 'text'");
+  addColumn(db, 'group_messages', 'media_id', 'TEXT');
+  addColumn(db, 'group_messages', 'sticker_id', 'TEXT');
   return db;
 }
