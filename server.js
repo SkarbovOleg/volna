@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { ROOT, MEDIA_DIR, openDb } from './db.js';
+import { ROOT, DATA_DIR, MEDIA_DIR, openDb } from './db.js';
 
 const PUBLIC = path.join(ROOT, 'public');
 
@@ -279,6 +279,31 @@ function seedIfEmpty() {
 }
 
 seedIfEmpty();
+
+/* ─────────────────────── бэкап базы ─────────────────────── */
+
+/**
+ * Снимок базы при каждом старте: VACUUM INTO даёт целостную копию
+ * вместе с данными из WAL. Держим последние 10 снимков.
+ * Копии лежат в backups/ — отдельно от data/, чтобы не пропасть вместе с ней.
+ */
+function backupDatabase() {
+  try {
+    const dir = path.join(ROOT, 'backups');
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const file = path.join(dir, `volna-${stamp}.db`);
+    if (!fs.existsSync(file)) db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+    const snapshots = fs.readdirSync(dir).filter((name) => name.endsWith('.db')).sort();
+    while (snapshots.length > 10) fs.unlinkSync(path.join(dir, snapshots.shift()));
+    return path.relative(ROOT, file);
+  } catch (err) {
+    console.error('  бэкап не сделался:', err.message);
+    return null;
+  }
+}
+
+const lastBackup = backupDatabase();
 
 /* ─────────────────────── API ─────────────────────── */
 
@@ -566,7 +591,13 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true });
       }
       if (pathname === '/api/health' && req.method === 'GET') {
-        return sendJson(res, 200, { ok: true, online: onlineIds().length, uptime: process.uptime() });
+        const { users } = db.prepare('SELECT COUNT(*) AS users FROM users').get();
+        return sendJson(res, 200, {
+          ok: true,
+          online: onlineIds().length,
+          users,
+          uptime: process.uptime(),
+        });
       }
 
       throw new HttpError(404, 'Неизвестный метод API');
@@ -622,8 +653,21 @@ if (process.env.MEDIA_EXTERNAL !== '1') {
 }
 
 function shutdown() {
+  // переносим WAL в основной файл, чтобы копия базы была целой даже без бэкапа
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  } catch {
+    /* уже закрыта */
+  }
   mediaChild?.kill();
-  server.close(() => process.exit(0));
+  server.close(() => {
+    try {
+      db.close();
+    } catch {
+      /* ignore */
+    }
+    process.exit(0);
+  });
   setTimeout(() => process.exit(0), 1500).unref();
 }
 
@@ -632,6 +676,10 @@ process.on('SIGTERM', shutdown);
 process.on('exit', () => mediaChild?.kill());
 
 server.listen(PORT, HOST, () => {
+  const { users } = db.prepare('SELECT COUNT(*) AS users FROM users').get();
   console.log(`\n  Волна запущена → http://${HOST}:${PORT}`);
-  console.log(`  Фотографии     → http://${HOST}:${MEDIA_PORT}/f/<id>\n`);
+  console.log(`  Фотографии     → http://${HOST}:${PORT}/f/<id>`);
+  console.log(`  Аккаунтов в базе: ${users} (${path.relative(ROOT, path.join(DATA_DIR, 'volna.db'))})`);
+  if (lastBackup) console.log(`  Копия базы:      ${lastBackup}\n`);
+  else console.log('');
 });

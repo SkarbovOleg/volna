@@ -280,6 +280,7 @@ function setAuthMode(mode) {
   $('#auth-pass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
   $('#auth-avatar-row').hidden = mode !== 'register';
   $('#invite-field').hidden = !(mode === 'register' && INVITE_REQUIRED);
+  $('#confirm-field').hidden = mode !== 'register';
   if (mode !== 'register') clearAuthAvatar();
   $('#auth-error').hidden = true;
 }
@@ -345,14 +346,27 @@ $('#auth-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const name = $('#auth-name').value.trim();
   const password = $('#auth-pass').value;
+
+  if (authMode === 'register' && password !== $('#auth-pass2').value) {
+    showAuthError('Пароли не совпадают');
+    return;
+  }
+
   const btn = $('#auth-submit');
   btn.disabled = true;
   showAuthError('');
   try {
     await doAuth(name, password);
     $('#auth-pass').value = '';
+    $('#auth-pass2').value = '';
   } catch (err) {
-    showAuthError(err.message);
+    if (err.status === 409) {
+      // имя занято — значит аккаунт уже есть: отправляем входить, пароль не стираем
+      setAuthMode('login');
+      showAuthError('Такое имя уже занято — похоже, ты уже регистрировался. Нажми «Войти».');
+    } else {
+      showAuthError(err.message);
+    }
   } finally {
     btn.disabled = false;
   }
