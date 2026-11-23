@@ -178,7 +178,7 @@ async function prepareImage(file) {
 }
 
 async function uploadImage(prepared) {
-  if (!MEDIA_URL) throw new Error('Фото-сервер не настроен');
+  // MEDIA_URL пустой — значит фото идут на тот же адрес (/api/media), это норма
   const res = await fetch(`${MEDIA_URL}/api/media`, {
     method: 'POST',
     headers: {
