@@ -27,6 +27,15 @@
         <h1 class="auth-title">Мессенджер,<br />который живёт у тебя</h1>
         <p class="auth-sub">Переписка и фотографии хранятся на твоём компьютере. Никаких аккаунтов в облаке.</p>
 
+        <div id="api-setup" hidden>
+          <label class="field">
+            <span>Адрес твоего сервера</span>
+            <input id="api-url" type="url" placeholder="https://например.trycloudflare.com" autocomplete="off" spellcheck="false" />
+          </label>
+          <button id="api-connect" class="btn-primary" type="button">Подключиться</button>
+          <p id="api-error" class="auth-error" role="alert" hidden></p>
+        </div>
+
         <div class="tabs" role="tablist">
           <button class="tab is-active" data-mode="login" role="tab">Вход</button>
           <button class="tab" data-mode="register" role="tab">Регистрация</button>
@@ -69,6 +78,11 @@
           Демо-аккаунты: <b>anya</b>, <b>mark</b>, <b>lena</b> — пароль <b>1234</b>. Открой второе окно браузера,
           чтобы переписываться с самим собой.
         </p>
+
+        <p class="auth-hint" id="api-current" hidden>
+          Сервер: <b id="api-current-url"></b> ·
+          <button id="api-change" class="link-btn" type="button">сменить</button>
+        </p>
       </div>
     </section>
 
@@ -104,6 +118,7 @@
         <footer class="sidebar-foot">
           <span class="dot-live"></span>
           <span id="online-count">0</span> онлайн
+          <button id="api-change-foot" class="link-btn" type="button" hidden>сменить сервер</button>
         </footer>
       </aside>
 

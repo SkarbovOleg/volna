@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Волна — мессенджер</title>
+    <meta name="theme-color" content="#0a0c10" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./style.css" />
+    <script src="./config.js"></script>
+  </head>
+  <body>
+    <!-- ───── вход ───── -->
+    <section id="auth-view" class="auth">
+      <div class="auth-glow" aria-hidden="true"></div>
+      <div class="auth-card">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M2.5 8.5c2.6-3 4.4-3 7 0s4.4 3 7 0 5-3 5-3" />
+              <path d="M2.5 15.5c2.6-3 4.4-3 7 0s4.4 3 7 0 5-3 5-3" opacity=".55" />
+            </svg>
+          </span>
+          <span class="brand-name">Волна</span>
+        </div>
+
+        <h1 class="auth-title">Мессенджер,<br />который живёт у тебя</h1>
+        <p class="auth-sub">Переписка и фотографии хранятся на твоём компьютере. Никаких аккаунтов в облаке.</p>
+
+        <div id="api-setup" hidden>
+          <label class="field">
+            <span>Адрес твоего сервера</span>
+            <input id="api-url" type="url" placeholder="https://например.trycloudflare.com" autocomplete="off" spellcheck="false" />
+          </label>
+          <button id="api-connect" class="btn-primary" type="button">Подключиться</button>
+          <p id="api-error" class="auth-error" role="alert" hidden></p>
+        </div>
+
+        <div class="tabs" role="tablist">
+          <button class="tab is-active" data-mode="login" role="tab">Вход</button>
+          <button class="tab" data-mode="register" role="tab">Регистрация</button>
+        </div>
+
+        <form id="auth-form" autocomplete="on">
+          <div class="auth-avatar" id="auth-avatar-row" hidden>
+            <button class="avatar avatar-pick" id="auth-avatar-btn" type="button" title="Добавить фото">
+              <img id="auth-avatar-img" alt="" hidden />
+              <span id="auth-avatar-letter" aria-hidden="true">+</span>
+            </button>
+            <div class="auth-avatar-text">
+              <b>Фото профиля</b>
+              <span>Необязательно. Можно добавить позже.</span>
+            </div>
+            <input id="auth-avatar-input" type="file" accept="image/*" hidden />
+          </div>
+
+          <label class="field">
+            <span>Имя</span>
+            <input id="auth-name" name="username" type="text" placeholder="например, anya" autocomplete="username" required minlength="2" maxlength="20" />
+          </label>
+          <label class="field">
+            <span>Пароль</span>
+            <input id="auth-pass" name="password" type="password" placeholder="••••" autocomplete="current-password" required minlength="4" />
+          </label>
+          <label class="field" id="confirm-field" hidden>
+            <span>Пароль ещё раз</span>
+            <input id="auth-pass2" type="password" placeholder="повтори, чтобы не опечататься" autocomplete="new-password" />
+          </label>
+          <label class="field" id="invite-field" hidden>
+            <span>Код приглашения</span>
+            <input id="auth-invite" type="text" placeholder="код от того, кто позвал" autocomplete="off" />
+          </label>
+          <p id="auth-error" class="auth-error" role="alert" hidden></p>
+          <button id="auth-submit" class="btn-primary" type="submit">Войти</button>
+        </form>
+
+        <p class="auth-hint" id="auth-hint">
+          Демо-аккаунты: <b>anya</b>, <b>mark</b>, <b>lena</b> — пароль <b>1234</b>. Открой второе окно браузера,
+          чтобы переписываться с самим собой.
+        </p>
+
+        <p class="auth-hint" id="api-current" hidden>
+          Сервер: <b id="api-current-url"></b> ·
+          <button id="api-change" class="link-btn" type="button">сменить</button>
+        </p>
+      </div>
+    </section>
+
+    <!-- ───── чат ───── -->
+    <section id="chat-view" class="chat" hidden>
+      <aside class="sidebar">
+        <header class="me-bar">
+          <button class="avatar avatar-button" id="me-avatar" type="button" title="Сменить фото профиля"></button>
+          <input id="me-avatar-input" type="file" accept="image/*" hidden />
+          <div class="me-info">
+            <div class="me-name" id="me-name">—</div>
+            <div class="me-status">в сети</div>
+          </div>
+          <button class="icon-btn" id="logout" title="Выйти" aria-label="Выйти">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M15 17l5-5-5-5" />
+              <path d="M20 12H9" />
+              <path d="M12 19H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6" />
+            </svg>
+          </button>
+        </header>
+
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
+          </svg>
+          <input id="search" type="search" placeholder="Поиск по чатам" aria-label="Поиск по чатам" />
+        </div>
+
+        <ul id="user-list" class="user-list" role="listbox" aria-label="Список чатов"></ul>
+
+        <footer class="sidebar-foot">
+          <span class="dot-live"></span>
+          <span id="online-count">0</span> онлайн
+          <button id="api-change-foot" class="link-btn" type="button" hidden>сменить сервер</button>
+        </footer>
+      </aside>
+
+      <main class="main">
+        <div id="empty-state" class="empty">
+          <div class="empty-art" aria-hidden="true">
+            <svg viewBox="0 0 96 96" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 44c0-14.4 12.7-26 28.4-26h11.2C69.3 18 82 29.6 82 44s-12.7 26-28.4 26H48l-14 9 2.5-12.2C25 62.5 14 54 14 44Z" opacity=".9" />
+              <path d="M35 42h.01M48 42h.01M61 42h.01" stroke-width="4.5" />
+            </svg>
+          </div>
+          <h2>Выбери чат</h2>
+          <p>Слева — люди. Напиши первым, даже если история пуста.</p>
+        </div>
+
+        <div id="conversation" class="conversation" hidden>
+          <header class="conv-head">
+            <button class="icon-btn back" id="back" title="Назад" aria-label="Назад">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <div class="avatar" id="peer-avatar"></div>
+            <div class="conv-info">
+              <div class="conv-name" id="peer-name">—</div>
+              <div class="conv-status" id="peer-status">не в сети</div>
+            </div>
+          </header>
+
+          <div id="messages" class="messages" tabindex="0"></div>
+          <div id="typing" class="typing" hidden>
+            <span class="typing-dots"><i></i><i></i><i></i></span>
+            <span id="typing-text">печатает…</span>
+          </div>
+
+          <form id="composer" class="composer">
+            <div id="attach-preview" class="attach-preview" hidden>
+              <img id="attach-img" alt="Выбранное фото" />
+              <div class="attach-info">
+                <span id="attach-name">фото</span>
+                <span id="attach-state" class="attach-state"></span>
+              </div>
+              <button class="icon-btn" id="attach-remove" type="button" title="Убрать" aria-label="Убрать">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+
+            <div class="composer-row">
+              <button class="icon-btn attach" id="attach" type="button" title="Отправить фото" aria-label="Отправить фото">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="16" rx="3" />
+                  <circle cx="8.5" cy="9.5" r="1.6" />
+                  <path d="m4 17 4.8-4.4a2 2 0 0 1 2.7 0L20 20" />
+                </svg>
+              </button>
+              <input id="attach-input" type="file" accept="image/*" hidden />
+              <textarea id="input" rows="1" placeholder="Сообщение…" maxlength="4000" aria-label="Сообщение"></textarea>
+              <button id="send" class="send" type="submit" title="Отправить" aria-label="Отправить">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4.5 12h14" />
+                  <path d="M12.5 5.5 19 12l-6.5 6.5" />
+                </svg>
+              </button>
+            </div>
+          </form>
+        </div>
+      </main>
+
+      <div id="conn-banner" class="conn-banner" hidden>Переподключение…</div>
+    </section>
+
+    <div id="lightbox" class="lightbox" hidden role="dialog" aria-label="Фотография">
+      <img id="lightbox-img" alt="" />
+      <button class="lightbox-close" id="lightbox-close" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

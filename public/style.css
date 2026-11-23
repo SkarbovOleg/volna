@@ -268,6 +268,32 @@ button {
   font-weight: 600;
 }
 
+.link-btn {
+  padding: 0;
+  color: var(--accent);
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: none;
+  border: 0;
+}
+
+.link-btn:hover {
+  color: #9db4ff;
+}
+
+.sidebar-foot .link-btn {
+  margin-left: auto;
+}
+
+#api-setup .field {
+  margin-top: 2px;
+}
+
+#api-setup .btn-primary {
+  margin-bottom: 6px;
+}
+
 .auth-avatar {
   display: flex;
   align-items: center;

@@ -519,6 +519,18 @@ const server = http.createServer(async (req, res) => {
   const { pathname } = url;
 
   try {
+    /* интерфейс может жить на другом домене (GitHub Pages) — разрешаем кросс-доменные запросы */
+    if (req.headers.origin) {
+      res.setHeader('access-control-allow-origin', '*');
+      res.setHeader('access-control-allow-methods', 'GET, HEAD, POST, PATCH, OPTIONS');
+      res.setHeader('access-control-allow-headers', 'authorization, content-type');
+      res.setHeader('access-control-max-age', '600');
+    }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204).end();
+      return;
+    }
+
     /* фото-сервис живёт на том же адресе, что и чат: так работает и через туннель */
     if (pathname.startsWith('/f/') || pathname.startsWith('/api/media')) {
       return proxyMedia(req, res);

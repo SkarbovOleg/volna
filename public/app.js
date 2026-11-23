@@ -2,9 +2,35 @@
 
 const $ = (sel) => document.querySelector(sel);
 
-const MEDIA_URL = ((window.VOLNA_CONFIG && window.VOLNA_CONFIG.mediaUrl) || '').replace(/\/+$/, '');
+const CONFIG = window.VOLNA_CONFIG || {};
+
+/**
+ * Интерфейс может открываться с чужого адреса (GitHub Pages): тогда сервер задаётся
+ * ссылкой вида .../#api=https://твой-сервер. Адрес запоминается и переживает перезагрузку.
+ */
+const API_BASE = (() => {
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const fromHash = (hash.get('api') || '').replace(/\/+$/, '');
+  if (fromHash) {
+    try {
+      localStorage.setItem('volna.apiBase', fromHash);
+    } catch {
+      /* приватный режим */
+    }
+    return fromHash;
+  }
+  try {
+    return (localStorage.getItem('volna.apiBase') || '').replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+})();
+
+const IS_REMOTE_UI = Boolean(CONFIG.pages);
+const MEDIA_URL = ((CONFIG.mediaUrl || API_BASE) || '').replace(/\/+$/, '');
 const mediaSrc = (id) => (id ? `${MEDIA_URL}/f/${encodeURIComponent(id)}` : '');
-const INVITE_REQUIRED = Boolean(window.VOLNA_CONFIG && window.VOLNA_CONFIG.inviteRequired);
+const INVITE_REQUIRED = Boolean(CONFIG.inviteRequired);
+const apiUrl = (path) => `${API_BASE}${path}`;
 
 const state = {
   token: localStorage.getItem('volna.token') || '',
@@ -36,14 +62,19 @@ class ApiError extends Error {
 }
 
 async function api(path, { method = 'GET', body } = {}) {
-  const res = await fetch(path, {
-    method,
-    headers: {
-      ...(body ? { 'content-type': 'application/json' } : {}),
-      ...(state.token ? { authorization: `Bearer ${state.token}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(apiUrl(path), {
+      method,
+      headers: {
+        ...(body ? { 'content-type': 'application/json' } : {}),
+        ...(state.token ? { authorization: `Bearer ${state.token}` } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new ApiError(0, 'Сервер не отвечает — проверь, запущен ли он');
+  }
   let data = null;
   try {
     data = await res.json();
@@ -275,6 +306,50 @@ $('#me-avatar-input').addEventListener('change', async (event) => {
 
 let authMode = 'login';
 
+/* Этот интерфейс открыт не со своего сервера (GitHub Pages) — спрашиваем адрес. */
+
+function showApiSetup() {
+  $('#api-setup').hidden = false;
+  document.querySelector('.tabs').hidden = true;
+  $('#auth-form').hidden = true;
+  $('#auth-hint').hidden = true;
+}
+
+function apiSetupError(text) {
+  const box = $('#api-error');
+  box.textContent = text;
+  box.hidden = !text;
+}
+
+function changeServer() {
+  try {
+    localStorage.removeItem('volna.apiBase');
+    localStorage.removeItem('volna.token');
+  } catch {
+    /* приватный режим */
+  }
+  location.hash = '';
+  location.reload();
+}
+
+$('#api-connect').addEventListener('click', () => {
+  const raw = $('#api-url').value.trim().replace(/\/+$/, '');
+  if (!/^https?:\/\/[^\s/]+/i.test(raw)) {
+    apiSetupError('Нужен адрес вида https://xxx.trycloudflare.com');
+    return;
+  }
+  try {
+    localStorage.setItem('volna.apiBase', raw);
+  } catch {
+    /* приватный режим */
+  }
+  location.hash = `api=${encodeURIComponent(raw)}`;
+  location.reload();
+});
+
+$('#api-change').addEventListener('click', changeServer);
+$('#api-change-foot').addEventListener('click', changeServer);
+
 function setAuthMode(mode) {
   authMode = mode;
   document.querySelectorAll('.tab').forEach((tab) => {
@@ -431,7 +506,7 @@ $('#logout').addEventListener('click', () => signOut());
 
 function connectStream() {
   state.es?.close();
-  const es = new EventSource(`/api/events?token=${encodeURIComponent(state.token)}`);
+  const es = new EventSource(apiUrl(`/api/events?token=${encodeURIComponent(state.token)}`));
   state.es = es;
 
   // любой пришедший пакет — признак, что поток жив
@@ -1046,6 +1121,16 @@ async function boot() {
   setAuthMode('login');
   autoGrow();
 
+  if (IS_REMOTE_UI) {
+    $('#api-change-foot').hidden = false;
+    if (!API_BASE) {
+      showApiSetup();
+      return;
+    }
+    $('#api-current').hidden = false;
+    $('#api-current-url').textContent = API_BASE.replace(/^https?:\/\//, '');
+  }
+
   // в закрытом режиме демо-аккаунты не афишируем и быстрый вход отключаем
   if (INVITE_REQUIRED) $('#auth-hint').hidden = true;
   else if (location.hash === '#demo') {
@@ -1060,9 +1145,13 @@ async function boot() {
   if (!state.token) return;
   try {
     await enterChat();
-  } catch {
-    state.token = '';
-    localStorage.removeItem('volna.token');
+  } catch (err) {
+    if (err.status === 401) {
+      state.token = '';
+      localStorage.removeItem('volna.token');
+    } else {
+      showAuthError(err.message);
+    }
   }
 }
 
