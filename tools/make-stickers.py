@@ -18,6 +18,14 @@ STICKERS = {
     "sleepy": ("Сон", "#8bb4ff", "#a9a2ff"),
     "cool": ("Крутость", "#63e0c8", "#4fb8ff"),
     "party": ("Праздник", "#ffb54d", "#ff7a9c"),
+    "wink": ("Подмигивание", "#7ad0ff", "#8f7bff"),
+    "think": ("Раздумье", "#9aa8c9", "#7f8eb3"),
+    "shock": ("Шок", "#ffd166", "#ff9d6d"),
+    "cry": ("Слёзы", "#6f9fe0", "#8f7bff"),
+    "star": ("Звёзды", "#8f7bff", "#6d8cff"),
+    "fire": ("Огонь", "#ff8a5c", "#ff5c5c"),
+    "devil": ("Чёртик", "#b18cff", "#8f5cff"),
+    "angel": ("Ангел", "#b9e3ff", "#8fd0ff"),
 }
 
 
@@ -106,6 +114,65 @@ def build():
   <circle cx="22" cy="34" r="4" fill="#4fb8ff"/>
   <circle cx="100" cy="44" r="3.5" fill="#ffd166"/>
   <circle cx="94" cy="20" r="3" fill="#ff7a9c"/>"""
+
+    parts["wink"] = f"""
+  <circle cx="45" cy="58" r="5" fill="{INK}"/>
+  <path d="M66 58 q9 -7 18 0" fill="none" stroke="{INK}" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M42 74 q18 16 36 0" fill="none" stroke="{INK}" stroke-width="5" stroke-linecap="round"/>"""
+
+    parts["think"] = f"""
+  <circle cx="47" cy="56" r="5" fill="{INK}"/>
+  <circle cx="73" cy="56" r="5" fill="{INK}"/>
+  <path d="M48 78 q12 6 24 0" fill="none" stroke="{INK}" stroke-width="4.5" stroke-linecap="round"/>
+  <circle cx="84" cy="30" r="4" fill="#fff" opacity=".55"/>
+  <circle cx="96" cy="20" r="5" fill="#fff" opacity=".75"/>
+  <circle cx="110" cy="8" r="6" fill="#fff" opacity=".95"/>"""
+
+    parts["shock"] = f"""
+  <circle cx="45" cy="57" r="9" fill="#fff" stroke="{INK}" stroke-width="2"/>
+  <circle cx="45" cy="57" r="3.4" fill="{INK}"/>
+  <circle cx="75" cy="57" r="9" fill="#fff" stroke="{INK}" stroke-width="2"/>
+  <circle cx="75" cy="57" r="3.4" fill="{INK}"/>
+  <ellipse cx="60" cy="82" rx="9" ry="11" fill="{INK}"/>"""
+
+    parts["cry"] = f"""
+  <path d="M38 56 q7 -8 14 0" fill="none" stroke="{INK}" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M68 56 q7 -8 14 0" fill="none" stroke="{INK}" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M44 78 q16 -14 32 0" fill="none" stroke="{INK}" stroke-width="5" stroke-linecap="round"/>
+  <path d="M45 64 v16" stroke="#8fd0ff" stroke-width="6" stroke-linecap="round"/>
+  <path d="M75 64 v20" stroke="#8fd0ff" stroke-width="6" stroke-linecap="round"/>"""
+
+    def star_points(cx, cy, r):
+        import math as _m
+
+        return " ".join(
+            f"{cx + (r if i % 2 == 0 else r * 0.45) * _m.cos(-1.5708 + i * 0.6283):.1f},"
+            f"{cy + (r if i % 2 == 0 else r * 0.45) * _m.sin(-1.5708 + i * 0.6283):.1f}"
+            for i in range(10)
+        )
+
+    parts["star"] = f"""
+  <polygon points="{star_points(45, 58, 10)}" fill="#ffd166" stroke="#ffb54d" stroke-width="1.5"/>
+  <polygon points="{star_points(75, 58, 10)}" fill="#ffd166" stroke="#ffb54d" stroke-width="1.5"/>
+  <path d="M42 74 q18 16 36 0" fill="none" stroke="{INK}" stroke-width="5" stroke-linecap="round"/>"""
+
+    parts["fire"] = eyes_dots() + f"""
+  <path d="M60 2 c8 10 12 16 12 22 a12 12 0 0 1 -24 0 c0 -6 4 -12 12 -22 z" fill="#ff8a3c"/>
+  <path d="M60 12 c4 6 6 9 6 12 a6 6 0 0 1 -12 0 c0 -3 2 -6 6 -12 z" fill="#ffd166"/>
+  <path d="M42 74 q18 16 36 0" fill="none" stroke="{INK}" stroke-width="5" stroke-linecap="round"/>"""
+
+    parts["devil"] = eyes_dots() + f"""
+  <path d="M30 44 l14 -18 l4 20 z" fill="{INK}"/>
+  <path d="M90 44 l-14 -18 l-4 20 z" fill="{INK}"/>
+  <path d="M40 46 l14 6" stroke="{INK}" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M80 46 l-14 6" stroke="{INK}" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M42 76 q18 18 36 0" fill="none" stroke="{INK}" stroke-width="5" stroke-linecap="round"/>"""
+
+    parts["angel"] = f"""
+  <ellipse cx="60" cy="6" rx="26" ry="6" fill="none" stroke="#ffd166" stroke-width="4"/>
+  <path d="M38 56 q7 -7 14 0" fill="none" stroke="{INK}" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M68 56 q7 -7 14 0" fill="none" stroke="{INK}" stroke-width="4.5" stroke-linecap="round"/>
+  <path d="M46 74 q14 12 28 0" fill="none" stroke="{INK}" stroke-width="5" stroke-linecap="round"/>"""
 
     for key, inner in parts.items():
         title, a, b = STICKERS[key]

@@ -26,7 +26,7 @@ const MAX_TEXT = 4000;
 const INVITE_CODE = (process.env.INVITE_CODE || '').trim();
 
 /** Набор стикеров лежит в public/stickers — id должны совпадать с именами файлов. */
-const STICKERS = new Set(['smile', 'laugh', 'love', 'sad', 'angry', 'sleepy', 'cool', 'party']);
+const STICKERS = new Set(['smile', 'laugh', 'love', 'sad', 'angry', 'sleepy', 'cool', 'party', 'wink', 'think', 'shock', 'cry', 'star', 'fire', 'devil', 'angel']);
 
 /* ─────────────────────────── база ─────────────────────────── */
 

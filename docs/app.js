@@ -35,7 +35,7 @@ const INVITE_REQUIRED = Boolean(CONFIG.inviteRequired);
 const apiUrl = (path) => `${API_BASE}${path}`;
 
 /** Набор стикеров: id = имя файла в ./stickers (лежит рядом с интерфейсом). */
-const STICKERS = ['smile', 'laugh', 'love', 'sad', 'angry', 'sleepy', 'cool', 'party'];
+const STICKERS = ['smile', 'laugh', 'love', 'sad', 'angry', 'sleepy', 'cool', 'party', 'wink', 'think', 'shock', 'cry', 'star', 'fire', 'devil', 'angel'];
 const stickerSrc = (id) => `./stickers/${id}.svg`;
 
 /* Ключ чата: 'u:12' — человек, 'g:3' — группа. */
