@@ -1806,3 +1806,13 @@ button {
 .row.mine .bubble:hover .bubble-menu {
   display: grid;
 }
+
+:root[data-theme='light'] .row .bubble.is-sticker {
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+:root[data-theme='light'] .row .bubble.is-sticker:hover {
+  background: none;
+}
