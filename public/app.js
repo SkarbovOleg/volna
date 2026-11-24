@@ -2043,6 +2043,12 @@ function openRename() {
 }
 
 $('#rename-peer').addEventListener('click', openRename);
+
+// вернулся во вкладку — подтягиваем свежие контакты (псевдонимы, аватары, статусы)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !state.me) return;
+  loadUsers();
+});
 // отладочная ручка: из консоли видно состояние (и удобно проверять автотестами)
 window.__volna = state;
 window.__volnaApi = API_BASE;
