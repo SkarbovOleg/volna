@@ -60,3 +60,16 @@ Write-Host "Открываю: $link"
 if ($env:VOLNA_NO_BROWSER -ne '1') { Start-Process $link }
 Write-Host ''
 Write-Host 'Готово. Окно можно закрыть — сервер и туннель остаются работать в фоне.'
+# 3. публикуем адрес в репозиторий: обычная ссылка github.io/volna подхватит его сама
+try {
+  Set-Content -Path (Join-Path $root 'server.json') -Value ("{""api"": ""$url""}") -Encoding utf8
+  & $node (Join-Path $root 'tools\make-pages.mjs') | Out-Null
+  Push-Location $root
+  git add server.json docs/server.json 2>$null
+  git commit --quiet -m "адрес сервера: $url" 2>$null
+  git push --quiet origin main 2>$null
+  Pop-Location
+  Write-Host 'Адрес опубликован в репозитории — github.io/volna откроется без хвоста.'
+} catch {
+  Write-Host 'Не удалось опубликовать адрес (не критично):' $_.Exception.Message
+}

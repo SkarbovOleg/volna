@@ -8,7 +8,7 @@ const CONFIG = window.VOLNA_CONFIG || {};
  * Интерфейс может открываться с чужого адреса (GitHub Pages): тогда сервер задаётся
  * ссылкой вида .../#api=https://твой-сервер. Адрес запоминается и переживает перезагрузку.
  */
-const API_BASE = (() => {
+const API_BASE_DEFAULT = (() => {
   const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
   const fromHash = (hash.get('api') || '').replace(/\/+$/, '');
   if (fromHash) {
@@ -26,9 +26,11 @@ const API_BASE = (() => {
   }
 })();
 
+let API_BASE = API_BASE_DEFAULT;
+
 const IS_REMOTE_UI = Boolean(CONFIG.pages);
-const MEDIA_URL = ((CONFIG.mediaUrl || API_BASE) || '').replace(/\/+$/, '');
-const mediaSrc = (id) => (id ? `${MEDIA_URL}/f/${encodeURIComponent(id)}` : '');
+const mediaBase = () => ((CONFIG.mediaUrl || API_BASE) || '').replace(/\/+$/, '');
+const mediaSrc = (id) => (id ? `${mediaBase()}/f/${encodeURIComponent(id)}` : '');
 const INVITE_REQUIRED = Boolean(CONFIG.inviteRequired);
 const apiUrl = (path) => `${API_BASE}${path}`;
 
@@ -260,8 +262,8 @@ async function prepareImage(file) {
 }
 
 async function uploadImage(prepared) {
-  // MEDIA_URL пустой — значит фото идут на тот же адрес (/api/media), это норма
-  const res = await fetch(`${MEDIA_URL}/api/media`, {
+  // пустой адрес — значит фото идут на тот же сервер (/api/media), это норма
+  const res = await fetch(`${mediaBase()}/api/media`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${state.token}`,
@@ -595,6 +597,64 @@ $('#me-avatar-input').addEventListener('change', async (event) => {
 /* ───────────────────────── авторизация ───────────────────────── */
 
 let authMode = 'login';
+
+/**
+ * Страница на GitHub Pages не знает, где сервер: адрес берём из ссылки (#api=…),
+ * из памяти браузера или из server.json, который обновляет online.cmd.
+ * Первый живой адрес и становится рабочим.
+ */
+async function probeServer(base) {
+  try {
+    const res = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(3500), cache: 'no-store' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function rememberServer(base) {
+  API_BASE = base;
+  try {
+    localStorage.setItem('volna.apiBase', base);
+  } catch {
+    /* приватный режим */
+  }
+}
+
+async function resolveServer() {
+  const candidates = [];
+  const hash = new URLSearchParams(location.hash.replace(/^#/, '')).get('api');
+  if (hash) candidates.push(hash.replace(/\/+$/, ''));
+  try {
+    const saved = localStorage.getItem('volna.apiBase');
+    if (saved) candidates.push(saved.replace(/\/+$/, ''));
+  } catch {
+    /* приватный режим */
+  }
+
+  for (const base of [...new Set(candidates)]) {
+    if (await probeServer(base)) {
+      rememberServer(base);
+      return true;
+    }
+  }
+
+  try {
+    const res = await fetch('./server.json', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      const published = String(data.api || '').replace(/\/+$/, '');
+      if (published && (await probeServer(published))) {
+        rememberServer(published);
+        return true;
+      }
+    }
+  } catch {
+    /* файла нет или он битый */
+  }
+
+  return false;
+}
 
 /* Этот интерфейс открыт не со своего сервера (GitHub Pages) — спрашиваем адрес. */
 
@@ -1653,7 +1713,8 @@ async function boot() {
 
   if (IS_REMOTE_UI) {
     $('#api-change-foot').hidden = false;
-    if (!API_BASE) {
+    const ok = await resolveServer();
+    if (!ok) {
       showApiSetup();
       return;
     }

@@ -37,7 +37,15 @@ for (const file of ['app.js', 'style.css', 'icon.svg', 'manifest.webmanifest', '
 cpSync(path.join(PUBLIC, 'icons'), path.join(DOCS, 'icons'), { recursive: true });
 cpSync(path.join(PUBLIC, 'stickers'), path.join(DOCS, 'stickers'), { recursive: true });
 
+// адрес живого сервера: его обновляет online.cmd, страница читает при загрузке
+const serverJson = path.join(ROOT, 'server.json');
+if (existsSync(serverJson)) {
+  copyFileSync(serverJson, path.join(DOCS, 'server.json'));
+} else {
+  writeFileSync(path.join(DOCS, 'server.json'), '{"api":""}\n', 'utf8');
+}
+
 console.log('docs/ собрана:');
-for (const file of ['index.html', 'config.js', 'app.js', 'style.css', 'icon.svg', 'manifest.webmanifest', 'sw.js', 'icons/', 'stickers/']) {
+for (const file of ['index.html', 'config.js', 'app.js', 'style.css', 'icon.svg', 'manifest.webmanifest', 'sw.js', 'icons/', 'stickers/', 'server.json']) {
   console.log('  ' + file);
 }
