@@ -646,6 +646,8 @@ function setNickname(user, peerId, payload) {
     if (nickname.length > MAX_NAME) throw new HttpError(400, `Максимум ${MAX_NAME} символов`);
     q.setNickname.run(user.id, peerId, nickname, now());
   }
+  // чтобы список контактов обновился и в других вкладках
+  broadcastTo(user.id, 'chats', {});
   return nickname || null;
 }
 
