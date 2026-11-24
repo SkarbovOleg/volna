@@ -100,9 +100,11 @@ export function openDb() {
   addColumn(db, 'messages', 'kind', "TEXT NOT NULL DEFAULT 'text'");
   addColumn(db, 'messages', 'media_id', 'TEXT');
   addColumn(db, 'messages', 'sticker_id', 'TEXT');
+  addColumn(db, 'messages', 'edited_at', 'INTEGER');
   // таблицы групп могли появиться в более ранней версии без этих колонок
   addColumn(db, 'group_messages', 'kind', "TEXT NOT NULL DEFAULT 'text'");
   addColumn(db, 'group_messages', 'media_id', 'TEXT');
   addColumn(db, 'group_messages', 'sticker_id', 'TEXT');
+  addColumn(db, 'group_messages', 'edited_at', 'INTEGER');
   return db;
 }

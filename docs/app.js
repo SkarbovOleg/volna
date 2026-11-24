@@ -81,6 +81,7 @@ const state = {
   typingTimer: null,
   streamErrors: 0,
   audio: null,
+  editing: null, // сообщение, которое правим
   pending: null, // фото, готовое к отправке
   authAvatar: null, // фото, выбранное при регистрации
   lastEventAt: Date.now(), // когда последний раз что-то пришло по SSE
@@ -910,6 +911,31 @@ function handleEvent(name, data) {
     return;
   }
 
+  if (name === 'messageEdited') {
+    const key = data.group ? keyOfGroup(data.group) : keyOfUser(data.from === state.me.id ? data.to : data.from);
+    const thread = state.threads.get(key);
+    if (thread) {
+      const message = thread.messages.find((m) => m.id === data.id);
+      if (message) {
+        message.body = data.body;
+        message.editedAt = data.editedAt;
+        if (key === state.activeKey) renderMessages({ keepScroll: true });
+      }
+    }
+    loadUsers();
+    return;
+  }
+
+  if (name === 'messageDeleted') {
+    const key = data.group ? keyOfGroup(data.group) : keyOfUser(data.from === state.me.id ? data.to : data.from);
+    const thread = state.threads.get(key);
+    if (thread) {
+      thread.messages = thread.messages.filter((m) => m.id !== data.id);
+      if (key === state.activeKey) renderMessages({ keepScroll: true });
+    }
+    loadUsers();
+    return;
+  }
   if (name === 'chats') {
     loadUsers();
     return;
@@ -1228,6 +1254,29 @@ async function send(text) {
   const key = state.activeKey;
   if ((!body && !photo) || !key) return;
 
+  if (state.editing) {
+    if (!body) return;
+    const target = state.editing;
+    $('#input').value = '';
+    autoGrow();
+    try {
+      await api(`/api/messages/${target.id}`, { method: 'PATCH', body: { body } });
+      const thread = state.threads.get(target.key);
+      const message = thread && thread.messages.find((m) => m.id === target.id);
+      if (message) {
+        message.body = body;
+        message.editedAt = Date.now();
+      }
+      cancelEdit();
+      if (target.key === state.activeKey) renderMessages({ keepScroll: true });
+    } catch (err) {
+      showToast(err.message);
+      $('#input').value = text;
+      autoGrow();
+    }
+    return;
+  }
+
   const { type, id } = parseKey(key);
   $('#input').value = '';
   autoGrow();
@@ -1528,6 +1577,19 @@ function renderMessages({ keepScroll = false } = {}) {
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
 
+    if (mine) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'bubble-menu';
+      more.textContent = '⋯';
+      more.title = 'Изменить или удалить';
+      more.addEventListener('click', (event) => {
+        event.stopPropagation();
+        openMsgMenu({ ...m, key }, event.clientX, event.clientY);
+      });
+      bubble.append(more);
+    }
+
     // в группе подписываем, кто написал
     if (chatType === 'group' && !mine && !sameAsPrev) {
       const author = document.createElement('span');
@@ -1576,6 +1638,12 @@ function renderMessages({ keepScroll = false } = {}) {
       const time = document.createElement('span');
       time.textContent = timeOf(m.at);
       meta.append(time);
+      if (m.editedAt) {
+        const edited = document.createElement('span');
+        edited.className = 'edited';
+        edited.textContent = 'изменено';
+        meta.append(edited);
+      }
       if (mine) {
         meta.append(eyeBadge(Boolean(m.readAt)));
       }
@@ -1738,6 +1806,170 @@ async function boot() {
   }
 }
 
+
+/* ───────────────────────── тема ───────────────────────── */
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+  try {
+    localStorage.setItem('volna.theme', theme);
+  } catch {
+    /* приватный режим */
+  }
+}
+
+function initTheme() {
+  let saved = null;
+  try {
+    saved = localStorage.getItem('volna.theme');
+  } catch {
+    /* приватный режим */
+  }
+  const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  applyTheme(saved || (prefersLight ? 'light' : 'dark'));
+}
+
+initTheme();
+
+$('#theme').addEventListener('click', () => {
+  applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+});
+
+/* ───────────────────────── правка и удаление ───────────────────────── */
+
+function hideMsgMenu() {
+  $('#msg-menu').hidden = true;
+}
+
+function messageFromRow(row) {
+  const key = state.activeKey;
+  if (!key || !row) return null;
+  const thread = state.threads.get(key);
+  if (!thread) return null;
+  const message = thread.messages.find((m) => String(m.id) === row.dataset.id);
+  return message ? { message, key } : null;
+}
+
+function openMsgMenu(target, x, y) {
+  const menu = $('#msg-menu');
+  const canEdit = (target.kind || 'text') === 'text' && !target.mediaId && !target.stickerId;
+
+  $('#msg-edit').hidden = !canEdit;
+  menu.hidden = false;
+  menu.dataset.id = String(target.id);
+  menu.dataset.key = target.key;
+  menu.dataset.body = target.body || '';
+
+  const width = 160;
+  const height = canEdit ? 92 : 50;
+  menu.style.left = `${Math.min(Math.max(8, x - 24), window.innerWidth - width - 10)}px`;
+  menu.style.top = `${Math.min(Math.max(8, y - 12), window.innerHeight - height - 10)}px`;
+}
+
+function startEdit() {
+  const menu = $('#msg-menu');
+  const target = { id: Number(menu.dataset.id), key: menu.dataset.key, body: menu.dataset.body };
+  hideMsgMenu();
+  if (!target.id) return;
+
+  state.editing = target;
+  $('#edit-bar').hidden = false;
+  const input = $('#input');
+  input.value = target.body;
+  input.focus();
+  autoGrow();
+  input.setSelectionRange(input.value.length, input.value.length);
+}
+
+function cancelEdit() {
+  state.editing = null;
+  $('#edit-bar').hidden = true;
+  $('#input').value = '';
+  autoGrow();
+}
+
+function removeLocalMessage(id, key) {
+  const thread = state.threads.get(key);
+  if (!thread) return;
+  thread.messages = thread.messages.filter((m) => m.id !== id);
+  if (key === state.activeKey) renderMessages({ keepScroll: true });
+}
+
+function askDelete() {
+  const menu = $('#msg-menu');
+  const id = Number(menu.dataset.id);
+  const key = menu.dataset.key;
+  hideMsgMenu();
+  if (!id) return;
+
+  openModal('Удалить сообщение?');
+  const body = $('#modal-body');
+  const hint = document.createElement('p');
+  hint.className = 'modal-hint';
+  hint.textContent = 'Сообщение исчезнет у тебя и у собеседника.';
+  body.append(hint);
+
+  const foot = $('#modal-foot');
+  const cancel = document.createElement('button');
+  cancel.className = 'btn-ghost';
+  cancel.type = 'button';
+  cancel.textContent = 'Отмена';
+  cancel.addEventListener('click', closeModal);
+
+  const ok = document.createElement('button');
+  ok.className = 'btn-ghost btn-danger';
+  ok.type = 'button';
+  ok.textContent = 'Удалить';
+  ok.addEventListener('click', async () => {
+    try {
+      await api(`/api/messages/${id}`, { method: 'DELETE' });
+      closeModal();
+      removeLocalMessage(id, key);
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+  foot.append(cancel, ok);
+}
+
+$('#msg-edit').addEventListener('click', startEdit);
+$('#msg-delete').addEventListener('click', askDelete);
+$('#edit-cancel').addEventListener('click', cancelEdit);
+
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('#msg-menu')) hideMsgMenu();
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') hideMsgMenu();
+});
+
+document.addEventListener('contextmenu', (event) => {
+  const row = event.target.closest('.row.mine');
+  const found = messageFromRow(row);
+  if (!found) return;
+  event.preventDefault();
+  openMsgMenu({ ...found.message, key: found.key }, event.clientX, event.clientY);
+});
+
+let pressTimer = null;
+
+document.addEventListener(
+  'touchstart',
+  (event) => {
+    const row = event.target.closest('.row.mine');
+    const found = messageFromRow(row);
+    if (!found) return;
+    const touch = event.touches[0];
+    pressTimer = setTimeout(() => {
+      openMsgMenu({ ...found.message, key: found.key }, touch.clientX, touch.clientY);
+    }, 480);
+  },
+  { passive: true },
+);
+
+document.addEventListener('touchend', () => clearTimeout(pressTimer));
+document.addEventListener('touchmove', () => clearTimeout(pressTimer));
 // отладочная ручка: из консоли видно состояние (и удобно проверять автотестами)
 window.__volna = state;
 window.__volnaApi = API_BASE;

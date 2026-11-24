@@ -102,6 +102,15 @@
             <div class="me-name" id="me-name">—</div>
             <div class="me-status">в сети</div>
           </div>
+          <button class="icon-btn" id="theme" title="Сменить тему" aria-label="Сменить тему">
+            <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a7 7 0 1 0 10.5 10.5Z" />
+            </svg>
+            <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="12" cy="12" r="4.2" />
+              <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6" />
+            </svg>
+          </button>
           <button class="icon-btn" id="new-group" title="Создать группу" aria-label="Создать группу">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
               <path d="M12 5v14M5 12h14" />
@@ -187,6 +196,18 @@
               </button>
             </div>
 
+            <div id="edit-bar" class="edit-bar" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M4 20h4L20 8l-4-4L4 16v4Z" />
+              </svg>
+              <span>Редактирование сообщения</span>
+              <button class="icon-btn" id="edit-cancel" type="button" title="Отменить" aria-label="Отменить">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+
             <div id="sticker-panel" class="sticker-panel" hidden>
               <div id="sticker-grid" class="sticker-grid"></div>
             </div>
@@ -221,6 +242,11 @@
 
       <div id="conn-banner" class="conn-banner" hidden>Переподключение…</div>
     </section>
+
+    <div id="msg-menu" class="msg-menu" hidden role="menu">
+      <button id="msg-edit" type="button" role="menuitem">Изменить</button>
+      <button id="msg-delete" type="button" role="menuitem" class="danger">Удалить</button>
+    </div>
 
     <div id="modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <div class="modal-card">

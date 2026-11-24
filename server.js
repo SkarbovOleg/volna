@@ -130,6 +130,7 @@ function publicMessage(row) {
     stickerId: row.sticker_id || null,
     at: row.created_at,
     readAt: row.read_at,
+    editedAt: row.edited_at || null,
   };
 }
 
@@ -146,6 +147,7 @@ function publicGroupMessage(row) {
     mediaId: row.media_id || null,
     stickerId: row.sticker_id || null,
     at: row.created_at,
+    editedAt: row.edited_at || null,
     fromName: sender ? sender.name : '?',
     fromHue: sender ? sender.hue : 232,
     fromAvatarId: sender ? sender.avatar_media_id || null : null,
@@ -699,6 +701,69 @@ function setAvatar(user, payload) {
   return fresh;
 }
 
+/** Ищет сообщение в личных и групповых, возвращает таблицу и строку. */
+function findMessage(id) {
+  const direct = q.messageById.get(id);
+  if (direct) return { table: 'direct', row: direct };
+  const grouped = gq.messageById.get(id);
+  if (grouped) return { table: 'group', row: grouped };
+  return null;
+}
+
+function editMessage(user, id, payload) {
+  const found = findMessage(id);
+  if (!found) throw new HttpError(404, 'Сообщение не найдено');
+  const { table, row } = found;
+  if (row.sender_id !== user.id) throw new HttpError(403, 'Можно изменять только свои сообщения');
+  if ((row.kind || 'text') !== 'text') throw new HttpError(400, 'Можно изменять только текст');
+
+  const body = String(payload.body || '').replace(/\r\n/g, '\n').trim();
+  if (!body) throw new HttpError(400, 'Пустое сообщение');
+  if (body.length > MAX_TEXT) throw new HttpError(400, `Максимум ${MAX_TEXT} символов`);
+
+  const at = now();
+  if (table === 'direct') {
+    db.prepare('UPDATE messages SET body = ?, edited_at = ? WHERE id = ?').run(body, at, id);
+  } else {
+    db.prepare('UPDATE group_messages SET body = ?, edited_at = ? WHERE id = ?').run(body, at, id);
+  }
+
+  const event = { id, body, editedAt: at, from: user.id };
+  if (table === 'direct') {
+    event.to = row.recipient_id;
+    broadcastTo(row.recipient_id, 'messageEdited', event);
+    broadcastTo(user.id, 'messageEdited', event);
+  } else {
+    event.group = row.group_id;
+    broadcastGroup(row.group_id, 'messageEdited', event);
+  }
+  return event;
+}
+
+function deleteMessage(user, id) {
+  const found = findMessage(id);
+  if (!found) throw new HttpError(404, 'Сообщение не найдено');
+  const { table, row } = found;
+  if (row.sender_id !== user.id) throw new HttpError(403, 'Можно удалять только свои сообщения');
+
+  if (table === 'direct') {
+    db.prepare('DELETE FROM messages WHERE id = ?').run(id);
+  } else {
+    db.prepare('DELETE FROM group_messages WHERE id = ?').run(id);
+  }
+
+  const event = { id, from: user.id };
+  if (table === 'direct') {
+    event.to = row.recipient_id;
+    broadcastTo(row.recipient_id, 'messageDeleted', event);
+    broadcastTo(user.id, 'messageDeleted', event);
+  } else {
+    event.group = row.group_id;
+    broadcastGroup(row.group_id, 'messageDeleted', event);
+  }
+  return event;
+}
+
 function markRead(user, payload) {
   if (payload.groupId) {
     const group = requireGroup(user.id, payload.groupId);
@@ -961,6 +1026,19 @@ const server = http.createServer(async (req, res) => {
       if (pathname === '/api/messages' && req.method === 'POST') {
         const { user } = requireUser(req, url);
         return sendJson(res, 201, { message: sendMessage(user, await readJson(req)) });
+      }
+
+      /* ── изменить или удалить своё сообщение ── */
+      const messageMatch = pathname.match(/^\/api\/messages\/(\d+)$/);
+      if (messageMatch) {
+        const { user } = requireUser(req, url);
+        const id = Number(messageMatch[1]);
+        if (req.method === 'PATCH') {
+          return sendJson(res, 200, { message: editMessage(user, id, await readJson(req)) });
+        }
+        if (req.method === 'DELETE') {
+          return sendJson(res, 200, deleteMessage(user, id));
+        }
       }
       if (pathname === '/api/read' && req.method === 'POST') {
         const { user } = requireUser(req, url);

@@ -1529,3 +1529,280 @@ button {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ───────────── светлая тема ───────────── */
+
+:root[data-theme='light'] {
+  --bg: #eef1f7;
+  --panel: #ffffff;
+  --panel-soft: #f2f5fb;
+  --panel-hover: #e9eef8;
+  --line: rgba(16, 24, 40, 0.085);
+  --line-strong: rgba(16, 24, 40, 0.16);
+  --text: #101828;
+  --muted: #5b6679;
+  --muted-dim: #8791a3;
+  --accent-soft: rgba(61, 97, 227, 0.1);
+  --online: #12a366;
+  --shadow: 0 18px 45px -22px rgba(16, 24, 40, 0.28);
+  color-scheme: light;
+}
+
+:root[data-theme='light'] body {
+  background: var(--bg);
+}
+
+:root[data-theme='light'] .auth {
+  background:
+    radial-gradient(1000px 600px at 10% -10%, rgba(61, 97, 227, 0.16), transparent 60%),
+    radial-gradient(900px 560px at 92% 108%, rgba(160, 123, 255, 0.14), transparent 60%),
+    var(--bg);
+}
+
+:root[data-theme='light'] .auth::after {
+  background: radial-gradient(circle at 50% 50%, transparent 55%, rgba(16, 24, 40, 0.06));
+}
+
+:root[data-theme='light'] .auth-card {
+  background: linear-gradient(180deg, #ffffff, #f7f9fd);
+  box-shadow: 0 24px 60px -32px rgba(16, 24, 40, 0.35), inset 0 1px 0 #fff;
+}
+
+:root[data-theme='light'] .auth-sub,
+:root[data-theme='light'] .auth-hint,
+:root[data-theme='light'] .field span,
+:root[data-theme='light'] .modal-hint,
+:root[data-theme='light'] .member-row .role {
+  color: var(--muted-dim);
+}
+
+:root[data-theme='light'] .tabs {
+  background: rgba(16, 24, 40, 0.04);
+}
+
+:root[data-theme='light'] .tab.is-active {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.12);
+}
+
+:root[data-theme='light'] .field input,
+:root[data-theme='light'] .modal-input {
+  background: #fff;
+  border-color: var(--line-strong);
+}
+
+:root[data-theme='light'] .field input:focus,
+:root[data-theme='light'] .modal-input:focus {
+  background: #fff;
+}
+
+:root[data-theme='light'] .sidebar {
+  background: linear-gradient(180deg, #ffffff, #f6f8fd);
+}
+
+:root[data-theme='light'] .avatar.online::after {
+  border-color: #fff;
+}
+
+:root[data-theme='light'] .search input {
+  background: rgba(16, 24, 40, 0.05);
+}
+
+:root[data-theme='light'] .search input:focus {
+  background: #fff;
+}
+
+:root[data-theme='light'] .search input::-webkit-search-cancel-button {
+  filter: none;
+}
+
+:root[data-theme='light'] .chat-item:hover {
+  background: rgba(16, 24, 40, 0.045);
+}
+
+:root[data-theme='light'] .main {
+  background:
+    radial-gradient(900px 460px at 50% 118%, rgba(61, 97, 227, 0.12), transparent 62%),
+    radial-gradient(700px 420px at 88% -10%, rgba(160, 123, 255, 0.1), transparent 60%),
+    var(--bg);
+}
+
+:root[data-theme='light'] .conv-head {
+  background: rgba(255, 255, 255, 0.86);
+}
+
+:root[data-theme='light'] .day span,
+:root[data-theme='light'] .load-more {
+  background: rgba(16, 24, 40, 0.05);
+}
+
+:root[data-theme='light'] .row.other .bubble {
+  background: #ffffff;
+  border-color: var(--line);
+  box-shadow: 0 6px 18px -14px rgba(16, 24, 40, 0.5);
+}
+
+:root[data-theme='light'] .row.other .meta {
+  color: var(--muted-dim);
+}
+
+:root[data-theme='light'] .eye-badge {
+  color: var(--muted);
+}
+
+:root[data-theme='light'] .row.mine .eye-badge {
+  color: #fff;
+}
+
+:root[data-theme='light'] .typing-dots {
+  background: #fff;
+}
+
+:root[data-theme='light'] .composer textarea {
+  background: #fff;
+  border-color: var(--line-strong);
+}
+
+:root[data-theme='light'] .attach {
+  background: rgba(16, 24, 40, 0.05);
+}
+
+:root[data-theme='light'] .attach-preview {
+  background: #fff;
+}
+
+:root[data-theme='light'] .sticker-panel {
+  background: #fff;
+}
+
+:root[data-theme='light'] .sticker-item:hover {
+  background: rgba(16, 24, 40, 0.06);
+}
+
+:root[data-theme='light'] .row .bubble.is-sticker .meta,
+:root[data-theme='light'] .row .bubble.is-sticker .eye-badge {
+  color: var(--muted);
+}
+
+:root[data-theme='light'] .modal {
+  background: rgba(24, 32, 48, 0.32);
+}
+
+:root[data-theme='light'] .modal-card {
+  background: linear-gradient(180deg, #ffffff, #f6f8fd);
+}
+
+:root[data-theme='light'] .pick-row:hover {
+  background: rgba(16, 24, 40, 0.05);
+}
+
+:root[data-theme='light'] .conn-banner {
+  color: #7a5a00;
+  background: #fff6dd;
+  border-color: rgba(200, 150, 0, 0.35);
+}
+
+:root[data-theme='light'] .user-list::-webkit-scrollbar-thumb,
+:root[data-theme='light'] .messages::-webkit-scrollbar-thumb,
+:root[data-theme='light'] .composer textarea::-webkit-scrollbar-thumb {
+  background-color: rgba(16, 24, 40, 0.18);
+}
+
+/* переключатель темы */
+#theme .ico-sun {
+  display: none;
+}
+
+:root[data-theme='light'] #theme .ico-sun {
+  display: block;
+}
+
+:root[data-theme='light'] #theme .ico-moon {
+  display: none;
+}
+
+/* ───────────── правка и удаление ───────────── */
+
+.edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border-radius: 13px;
+  border: 1px solid var(--line-strong);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.edit-bar svg {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+}
+
+.edit-bar span {
+  flex: 1;
+}
+
+.edit-bar .icon-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.meta .edited {
+  margin-left: 2px;
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.msg-menu {
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  animation: pop 0.12s ease both;
+}
+
+.msg-menu button {
+  padding: 9px 12px;
+  border-radius: 10px;
+  text-align: left;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.msg-menu button:hover {
+  background: rgba(127, 140, 170, 0.14);
+}
+
+.msg-menu button.danger {
+  color: #e5484d;
+}
+
+.bubble .bubble-menu {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 24px;
+  height: 24px;
+  display: none;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  box-shadow: 0 4px 12px -6px rgba(0, 0, 0, 0.5);
+}
+
+.row.mine .bubble:hover .bubble-menu {
+  display: grid;
+}

@@ -28,6 +28,8 @@ const evalArg = args.find((a) => a.startsWith('--eval='));
 const evalFileArg = args.find((a) => a.startsWith('--eval-file='));
 const fileArg = args.find((a) => a.startsWith('--file='));
 const sizeArg = args.find((a) => a.startsWith('--size='));
+const dprArg = args.find((a) => a.startsWith('--dpr='));
+const dpr = dprArg ? Number(dprArg.split('=')[1]) : 1;
 const [width, height] = (sizeArg ? sizeArg.split('=')[1] : '1440x900').split('x').map(Number);
 
 const browserPath = CANDIDATES.find((p) => existsSync(p));
@@ -107,7 +109,7 @@ async function main() {
   await send('Emulation.setDeviceMetricsOverride', {
     width,
     height,
-    deviceScaleFactor: 1,
+    deviceScaleFactor: dpr,
     mobile: false,
   });
 
@@ -151,7 +153,10 @@ async function main() {
     await wait(1200);
   }
 
-  const shot = await send('Page.captureScreenshot', { format: 'png' });
+  const shot = await send('Page.captureScreenshot', {
+    format: 'png',
+    ...(dpr > 1 ? { clip: { x: 0, y: 0, width, height, scale: dpr } } : {}),
+  });
   writeFileSync(out, Buffer.from(shot.data, 'base64'));
   console.log('saved', out, `(${width}x${height})`);
 
