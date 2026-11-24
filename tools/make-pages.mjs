@@ -5,7 +5,7 @@
  *
  *   node tools/make-pages.mjs
  */
-import { mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, cpSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, copyFileSync, rmSync, cpSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
