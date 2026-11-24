@@ -21,6 +21,7 @@ const MEDIA_HOST = process.env.MEDIA_HOST || '127.0.0.1';
 const MEDIA_PORT = Number(process.env.MEDIA_PORT || 8788);
 const MAX_BODY = 256 * 1024;
 const MAX_TEXT = 4000;
+const MAX_NAME = 32;
 
 /** Если задан — зарегистрироваться можно только с этим кодом. */
 const INVITE_CODE = (process.env.INVITE_CODE || '').trim();
@@ -48,7 +49,7 @@ const q = {
   markRead: db.prepare('UPDATE messages SET read_at = ? WHERE sender_id = ? AND recipient_id = ? AND read_at IS NULL'),
   maxFromPair: db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM messages WHERE sender_id = ? AND recipient_id = ?'),
   contacts: db.prepare(`
-    SELECT u.id, u.name, u.hue, u.avatar_media_id,
+    SELECT u.id, u.name, u.hue, u.avatar_media_id, n.nickname,
       lm.body     AS last_body,
       lm.kind     AS last_kind,
       lm.created_at AS last_at,
@@ -56,6 +57,7 @@ const q = {
       (SELECT COUNT(*) FROM messages m
         WHERE m.sender_id = u.id AND m.recipient_id = ? AND m.read_at IS NULL) AS unread
     FROM users u
+    LEFT JOIN nicknames n ON n.owner_id = ? AND n.peer_id = u.id
     LEFT JOIN (
       SELECT m.* FROM messages m
       JOIN (
@@ -69,6 +71,11 @@ const q = {
     WHERE u.id != ?
     ORDER BY (last_at IS NULL) ASC, last_at DESC, u.name COLLATE NOCASE ASC
   `),
+  setNickname: db.prepare(`
+    INSERT INTO nicknames (owner_id, peer_id, nickname, updated_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(owner_id, peer_id) DO UPDATE SET nickname = excluded.nickname, updated_at = excluded.updated_at
+  `),
+  clearNickname: db.prepare('DELETE FROM nicknames WHERE owner_id = ? AND peer_id = ?'),
 };
 
 /* ─────────────────────── группы ─────────────────────── */
@@ -609,11 +616,12 @@ function login({ name, password }) {
 }
 
 function contacts(userId) {
-  const rows = q.contacts.all(userId, userId, userId, userId, userId);
+  const rows = q.contacts.all(userId, userId, userId, userId, userId, userId);
   const online = new Set(onlineIds());
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
+    nickname: r.nickname || null,
     hue: r.hue,
     avatarId: r.avatar_media_id || null,
     lastBody: r.last_body,
@@ -623,6 +631,22 @@ function contacts(userId) {
     unread: r.unread,
     online: online.has(r.id),
   }));
+}
+
+/** Приватный псевдоним: виден только тому, кто его придумал. */
+function setNickname(user, peerId, payload) {
+  const peer = q.userById.get(peerId);
+  if (!peer) throw new HttpError(404, 'Нет такого пользователя');
+  if (peer.id === user.id) throw new HttpError(400, 'Себя переименовать нельзя');
+
+  const nickname = String(payload.nickname || '').replace(/\s+/g, ' ').trim();
+  if (!nickname) {
+    q.clearNickname.run(user.id, peerId);
+  } else {
+    if (nickname.length > MAX_NAME) throw new HttpError(400, `Максимум ${MAX_NAME} символов`);
+    q.setNickname.run(user.id, peerId, nickname, now());
+  }
+  return nickname || null;
 }
 
 function history(userId, otherId, before, limit) {
@@ -991,6 +1015,14 @@ const server = http.createServer(async (req, res) => {
         q.deleteSession.run(token);
         return sendJson(res, 200, { ok: true });
       }
+      /* ── приватный псевдоним контакта ── */
+      const nicknameMatch = pathname.match(/^\/api\/users\/(\d+)\/nickname$/);
+      if (nicknameMatch && req.method === 'PUT') {
+        const { user } = requireUser(req, url);
+        const nickname = setNickname(user, Number(nicknameMatch[1]), await readJson(req));
+        return sendJson(res, 200, { nickname, users: contacts(user.id) });
+      }
+
       if (pathname === '/api/me' && req.method === 'GET') {
         const { user } = requireUser(req, url);
         return sendJson(res, 200, { user, online: onlineIds() });

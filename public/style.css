@@ -1816,3 +1816,17 @@ button {
 :root[data-theme='light'] .row .bubble.is-sticker:hover {
   background: none;
 }
+
+.btn-ghost.is-primary {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+}
+
+.btn-ghost.is-primary:hover {
+  filter: brightness(1.08);
+}
+
+.name-edit {
+  color: var(--muted);
+}

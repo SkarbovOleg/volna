@@ -1,5 +1,5 @@
 /* Волна — service worker: оболочка приложения кэшируется, данные всегда из сети. */
-const CACHE = 'volna-shell-v6';
+const CACHE = 'volna-shell-v7';
 const SHELL = ['./', './style.css', './manifest.webmanifest', './icon.svg', './icons/icon-192.png'];
 
 self.addEventListener('install', (event) => {

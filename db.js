@@ -79,6 +79,13 @@ CREATE TABLE IF NOT EXISTS group_reads (
   up_to    INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (group_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS nicknames (
+  owner_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  peer_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  nickname   TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (owner_id, peer_id)
+);
 `;
 
 /** Добавляет колонку, если её ещё нет (для баз, созданных до обновления). */

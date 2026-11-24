@@ -595,6 +595,8 @@ $('#me-avatar-input').addEventListener('change', async (event) => {
   }
 });
 
+/** Как показывать человека: приватный псевдоним, если задан, иначе имя. */
+const displayName = (user) => (user && (user.nickname || user.name)) || '';
 /* ───────────────────────── авторизация ───────────────────────── */
 
 let authMode = 'login';
@@ -1344,7 +1346,7 @@ function chatItems() {
       key: keyOfUser(user.id),
       type: 'user',
       id: user.id,
-      title: user.name,
+      title: displayName(user),
       hue: user.hue,
       avatarId: user.avatarId,
       lastBody: user.lastBody,
@@ -1491,18 +1493,21 @@ function renderHead() {
     status.classList.remove('is-online');
     $('#conv-head').classList.add('is-group');
     $('#group-info').hidden = false;
+    $('#rename-peer').hidden = true;
     return;
   }
 
   const peer = state.users.find((u) => u.id === id);
   if (!peer) return;
   $('#group-info').hidden = true;
+  $('#rename-peer').hidden = false;
   const online = state.online.has(peer.id) || peer.online;
-  paintAvatar($('#peer-avatar'), peer);
+  paintAvatar($('#peer-avatar'), { ...peer, name: displayName(peer) });
   $('#peer-avatar').classList.remove('is-group');
   $('#peer-avatar').classList.toggle('online', online);
-  $('#peer-name').textContent = peer.name;
+  $('#peer-name').textContent = displayName(peer);
   status.textContent = online ? 'в сети' : 'не в сети';
+  if (peer.nickname) status.textContent += ' · ' + peer.name;
   status.classList.toggle('is-online', online);
   $('#conv-head').classList.remove('is-group');
 }
@@ -1570,7 +1575,7 @@ function renderMessages({ keepScroll = false } = {}) {
         chatType === 'group'
           ? { name: m.fromName || '?', hue: m.fromHue ?? 232, avatarId: m.fromAvatarId || null }
           : state.users.find((u) => u.id === chatId) || { name: '?', hue: 232 };
-      const avatar = makeAvatar(sender, sameAsPrev ? 'hidden' : '');
+      const avatar = makeAvatar({ ...sender, name: displayName(sender) }, sameAsPrev ? 'hidden' : '');
       row.append(avatar);
     }
 
@@ -1970,6 +1975,74 @@ document.addEventListener(
 
 document.addEventListener('touchend', () => clearTimeout(pressTimer));
 document.addEventListener('touchmove', () => clearTimeout(pressTimer));
+
+/* ───────────────────────── псевдоним контакта ───────────────────────── */
+
+function openRename() {
+  const key = state.activeKey;
+  if (!key) return;
+  const { type, id } = parseKey(key);
+  if (type !== 'user') return;
+  const peer = state.users.find((u) => u.id === id);
+  if (!peer) return;
+
+  openModal('Как показывать контакт?');
+  const body = $('#modal-body');
+  const hint = document.createElement('p');
+  hint.className = 'modal-hint';
+  hint.textContent = 'Псевдоним видишь только ты. У собеседника останется обычное имя.';
+  const input = document.createElement('input');
+  input.className = 'modal-input';
+  input.maxLength = 32;
+  input.value = peer.nickname || peer.name;
+  input.placeholder = peer.name;
+  body.append(hint, input);
+
+  const foot = $('#modal-foot');
+  const cancel = document.createElement('button');
+  cancel.className = 'btn-ghost';
+  cancel.type = 'button';
+  cancel.textContent = 'Отмена';
+  cancel.addEventListener('click', closeModal);
+
+  const save = document.createElement('button');
+  save.className = 'btn-ghost is-primary';
+  save.type = 'button';
+  save.textContent = 'Сохранить';
+
+  const apply = async (nickname) => {
+    try {
+      const data = await api('/api/users/' + id + '/nickname', { method: 'PUT', body: { nickname } });
+      state.users = data.users;
+      closeModal();
+      renderList();
+      renderHead();
+      loadUsers();
+    } catch (err) {
+      showToast(err.message);
+    }
+  };
+
+  save.addEventListener('click', () => apply(input.value));
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') apply(input.value);
+  });
+
+  if (peer.nickname) {
+    const reset = document.createElement('button');
+    reset.className = 'btn-ghost';
+    reset.type = 'button';
+    reset.textContent = 'Вернуть имя';
+    reset.addEventListener('click', () => apply(''));
+    foot.append(cancel, reset, save);
+  } else {
+    foot.append(cancel, save);
+  }
+
+  setTimeout(() => input.focus(), 30);
+}
+
+$('#rename-peer').addEventListener('click', openRename);
 // отладочная ручка: из консоли видно состояние (и удобно проверять автотестами)
 window.__volna = state;
 window.__volnaApi = API_BASE;
