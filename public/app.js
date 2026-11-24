@@ -81,6 +81,7 @@ const state = {
   typingTimer: null,
   streamErrors: 0,
   audio: null,
+  found: [], // найденные люди, с которыми ещё нет чата
   editing: null, // сообщение, которое правим
   pending: null, // фото, готовое к отправке
   authAvatar: null, // фото, выбранное при регистрации
@@ -1393,10 +1394,12 @@ function renderList() {
   );
 
   list.replaceChildren();
-  if (!items.length) {
+  if (!items.length && !state.found.length) {
     const empty = document.createElement('li');
     empty.className = 'list-empty';
-    empty.textContent = state.users.length || state.groups.length ? 'Ничего не найдено' : 'Пока никого нет — позови друга';
+    empty.textContent = state.filter
+      ? 'Ничего не найдено'
+      : 'Пока никого нет — найди человека по имени через поиск';
     list.append(empty);
   }
 
@@ -1465,6 +1468,58 @@ function renderList() {
 
     item.addEventListener('click', () => openThread(chat.key));
     list.append(item);
+  }
+
+  // результаты поиска по людям, с которыми ещё нет переписки
+  if (state.found.length) {
+    const heading = document.createElement('li');
+    heading.className = 'list-heading';
+    heading.textContent = 'Найти человека';
+    list.append(heading);
+
+    for (const person of state.found) {
+      const item = document.createElement('li');
+      item.className = 'chat-item is-found';
+      item.setAttribute('role', 'option');
+      item.append(
+        makeAvatar(
+          { name: displayName(person), hue: person.hue, avatarId: person.avatarId },
+          person.online ? 'online' : '',
+        ),
+      );
+
+      const body = document.createElement('div');
+      body.className = 'chat-body';
+
+      const top = document.createElement('div');
+      top.className = 'chat-top';
+      const name = document.createElement('div');
+      name.className = 'chat-name';
+      name.textContent = displayName(person);
+      top.append(name);
+
+      const preview = document.createElement('div');
+      preview.className = 'chat-preview';
+      const hint = document.createElement('span');
+      hint.textContent = 'начать чат';
+      hint.style.color = 'var(--muted-dim)';
+      preview.append(hint);
+
+      body.append(top, preview);
+      item.append(body);
+
+      item.addEventListener('click', () => {
+        if (!state.users.some((u) => u.id === person.id)) {
+          state.users.push({ ...person, unread: 0, lastAt: null });
+        }
+        state.filter = '';
+        state.found = [];
+        $('#search').value = '';
+        renderList();
+        openThread(keyOfUser(person.id));
+      });
+      list.append(item);
+    }
   }
 
   const total = [...state.users, ...state.groups].reduce((sum, x) => sum + (x.unread || 0), 0);
@@ -1743,9 +1798,31 @@ $('#input').addEventListener('input', () => {
   }).catch(() => {});
 });
 
+let searchTimer = null;
+
+async function runSearch() {
+  const query = state.filter.trim();
+  if (query.length < 2) {
+    state.found = [];
+    renderList();
+    return;
+  }
+  try {
+    const data = await api('/api/users?q=' + encodeURIComponent(query));
+    if (state.filter.trim() !== query) return; // пока искали, запрос сменился
+    state.found = (data.users || []).filter((u) => !state.users.some((own) => own.id === u.id));
+    renderList();
+  } catch {
+    state.found = [];
+    renderList();
+  }
+}
+
 $('#search').addEventListener('input', (event) => {
   state.filter = event.target.value;
   renderList();
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 280);
 });
 
 document.addEventListener('paste', async (event) => {

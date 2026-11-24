@@ -104,6 +104,7 @@ export function openDb() {
   db.exec('PRAGMA foreign_keys = ON');
   db.exec(SCHEMA);
   addColumn(db, 'users', 'avatar_media_id', 'TEXT');
+  addColumn(db, 'users', 'display_name', 'TEXT');
   addColumn(db, 'messages', 'kind', "TEXT NOT NULL DEFAULT 'text'");
   addColumn(db, 'messages', 'media_id', 'TEXT');
   addColumn(db, 'messages', 'sticker_id', 'TEXT');

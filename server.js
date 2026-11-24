@@ -35,6 +35,9 @@ const db = openDb();
 
 const q = {
   userByName: db.prepare('SELECT * FROM users WHERE name = ?'),
+  userByDisplay: db.prepare(
+    "SELECT * FROM users WHERE display_name = ? AND display_name IS NOT NULL AND display_name != ''",
+  ),
   userById: db.prepare('SELECT * FROM users WHERE id = ?'),
   insertUser: db.prepare('INSERT INTO users (name, pass_hash, salt, hue, created_at) VALUES (?, ?, ?, ?, ?)'),
   insertSession: db.prepare('INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)'),
@@ -49,7 +52,7 @@ const q = {
   markRead: db.prepare('UPDATE messages SET read_at = ? WHERE sender_id = ? AND recipient_id = ? AND read_at IS NULL'),
   maxFromPair: db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM messages WHERE sender_id = ? AND recipient_id = ?'),
   contacts: db.prepare(`
-    SELECT u.id, u.name, u.hue, u.avatar_media_id, n.nickname,
+    SELECT u.id, COALESCE(NULLIF(u.display_name, ''), u.name) AS name, u.hue, u.avatar_media_id, n.nickname,
       lm.body     AS last_body,
       lm.kind     AS last_kind,
       lm.created_at AS last_at,
@@ -84,7 +87,7 @@ const gq = {
   byId: db.prepare('SELECT * FROM groups WHERE id = ?'),
   mine: db.prepare('SELECT g.* FROM groups g JOIN group_members m ON m.group_id = g.id AND m.user_id = ?'),
   members: db.prepare(
-    `SELECT u.id, u.name, u.hue, u.avatar_media_id
+    `SELECT u.id, COALESCE(NULLIF(u.display_name, ''), u.name) AS name, u.hue, u.avatar_media_id
      FROM group_members gm JOIN users u ON u.id = gm.user_id
      WHERE gm.group_id = ? ORDER BY gm.joined_at, u.id`,
   ),
@@ -123,7 +126,12 @@ function safeEqual(a, b) {
 }
 
 function publicUser(row) {
-  return { id: row.id, name: row.name, hue: row.hue, avatarId: row.avatar_media_id || null };
+  return {
+    id: row.id,
+    name: row.display_name || row.name,
+    hue: row.hue,
+    avatarId: row.avatar_media_id || null,
+  };
 }
 
 function publicMessage(row) {
@@ -591,7 +599,7 @@ function register({ name, password, invite }) {
   if (clean.length < 2 || clean.length > 20) throw new HttpError(400, 'Имя: от 2 до 20 символов');
   if (!/^[\p{L}\p{N} ._-]+$/u.test(clean)) throw new HttpError(400, 'В имени только буквы, цифры, пробел, . _ -');
   if (pass.length < 4) throw new HttpError(400, 'Пароль: минимум 4 символа');
-  if (q.userByName.get(clean)) throw new HttpError(409, 'Такое имя уже занято');
+  if (q.userByName.get(clean) || q.userByDisplay.get(clean)) throw new HttpError(409, 'Такое имя уже занято');
 
   const salt = crypto.randomBytes(16).toString('hex');
   const hue = Math.floor(Math.random() * 360);
@@ -604,7 +612,7 @@ function register({ name, password, invite }) {
 
 function login({ name, password }) {
   const clean = String(name || '').trim();
-  const row = q.userByName.get(clean);
+  const row = q.userByName.get(clean) || q.userByDisplay.get(clean);
   const salt = row ? row.salt : 'no-such-user-salt';
   const expected = row ? row.pass_hash : hashPass('invalid', salt);
   const actual = hashPass(String(password || ''), salt);
@@ -618,19 +626,47 @@ function login({ name, password }) {
 function contacts(userId) {
   const rows = q.contacts.all(userId, userId, userId, userId, userId, userId);
   const online = new Set(onlineIds());
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    nickname: r.nickname || null,
-    hue: r.hue,
-    avatarId: r.avatar_media_id || null,
-    lastBody: r.last_body,
-    lastKind: r.last_kind || null,
-    lastAt: r.last_at,
-    lastFrom: r.last_from,
-    unread: r.unread,
-    online: online.has(r.id),
-  }));
+  // в списке только те, с кем уже есть переписка — остальных находят поиском
+  return rows
+    .filter((r) => r.last_at)
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      nickname: r.nickname || null,
+      hue: r.hue,
+      avatarId: r.avatar_media_id || null,
+      lastBody: r.last_body,
+      lastKind: r.last_kind || null,
+      lastAt: r.last_at,
+      lastFrom: r.last_from,
+      unread: r.unread,
+      online: online.has(r.id),
+    }));
+}
+
+/** Поиск людей по имени, чтобы начать новый чат. */
+function searchUsers(userId, query) {
+  const text = String(query || '').trim().toLowerCase();
+  if (text.length < 2) return [];
+  const online = new Set(onlineIds());
+  const rows = db
+    .prepare(
+      `SELECT id, name, COALESCE(NULLIF(display_name, ''), name) AS shown, hue, avatar_media_id
+       FROM users WHERE id != ? ORDER BY name COLLATE NOCASE`,
+    )
+    .all(userId);
+
+  // SQLite не умеет регистронезависимый поиск по кириллице — сравниваем в JS
+  return rows
+    .filter((r) => r.name.toLowerCase().includes(text) || r.shown.toLowerCase().includes(text))
+    .slice(0, 20)
+    .map((r) => ({
+      id: r.id,
+      name: r.shown,
+      hue: r.hue,
+      avatarId: r.avatar_media_id || null,
+      online: online.has(r.id),
+    }));
 }
 
 /** Приватный псевдоним: виден только тому, кто его придумал. */
@@ -1037,6 +1073,10 @@ const server = http.createServer(async (req, res) => {
       /* ── чаты ── */
       if (pathname === '/api/users' && req.method === 'GET') {
         const { user } = requireUser(req, url);
+        const query = url.searchParams.get('q');
+        if (query) {
+          return sendJson(res, 200, { users: searchUsers(user.id, query), search: true });
+        }
         return sendJson(res, 200, {
           users: contacts(user.id),
           groups: myGroups(user.id),
